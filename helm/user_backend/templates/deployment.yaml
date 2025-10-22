@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "user-backend.fullname" . }}
+  labels:
+    app: {{ include "user-backend.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "user-backend.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "user-backend.name" . }}
+    spec:
+      containers:
+        - name: user-backend
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          env:
+            - name: EMBEDDING_ENDPOINT
+              value: "{{ .Values.env.EMBEDDING_ENDPOINT }}"
+            - name: CHUNK_URL
+              value: "{{ .Values.env.CHUNK_URL }}"
+            - name: VECTOR_DB_ENDPOINT
+              value: "{{ .Values.env.VECTOR_DB_ENDPOINT }}"
+            - name: DEPLOYED_INDEX_ID
+              value: "{{ .Values.env.DEPLOYED_INDEX_ID }}"
+            - name: MEMORY_STORE_HOST
+              value: "{{ .Values.env.MEMORY_STORE_HOST }}"
+            - name: MEMORY_STORE_PORT
+              value: "{{ .Values.env.MEMORY_STORE_PORT }}"
+            - name: PROJECT_ID
+              value: "{{ .Values.env.PROJECT_ID }}"
+            - name: REGION
+              value: "{{ .Values.env.REGION }}"
+            - name: LLM_MODEL_ID
+              value: "{{ .Values.env.LLM_MODEL_ID }}"
+            - name: LLM_ENDPOINT
+              value: "{{ .Values.env.LLM_ENDPOINT }}"
+            - name: LLM_TEMPERATURE
+              value: "{{ .Values.env.LLM_TEMPERATURE }}"
+            - name: LLM_MAX_OUTPUT_TOKENS
+              value: "{{ .Values.env.LLM_MAX_OUTPUT_TOKENS }}"
+            - name: VECTOR_NEIGHBOR_COUNT
+              value: "{{ .Values.env.VECTOR_NEIGHBOR_COUNT }}"
+          # if you store password in Kubernetes secret, mount as env
+          {{- if .Values.env.MEMORY_STORE_PASSWORD_SECRET }}
+            - name: MEMORY_STORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.env.MEMORY_STORE_PASSWORD_SECRET }}
+                  key: MEMORY_STORE_PASSWORD
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probe.periodSeconds }}
+            timeoutSeconds: {{ .Values.probe.timeoutSeconds }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probe.periodSeconds }}
+            timeoutSeconds: {{ .Values.probe.timeoutSeconds }}
+          resources:
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}

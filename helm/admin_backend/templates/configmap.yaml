@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-config
+data:
+  EMBEDDING_ENDPOINT: "{{ .Values.env.EMBEDDING_ENDPOINT }}"
+  METADATA_DB_URL: "{{ .Values.env.METADATA_DB_URL }}"
+  CHUNK_URL: "{{ .Values.env.CHUNK_URL }}"
+  VECTOR_DB_ENDPOINT: "{{ .Values.env.VECTOR_DB_ENDPOINT }}"
+  DEPLOYED_INDEX_ID: "{{ .Values.env.DEPLOYED_INDEX_ID }}"
+  PROJECT_ID: "{{ .Values.env.PROJECT_ID }}"
+  REGION: "{{ .Values.env.REGION }}"
+

@@ -1,0 +1,56 @@
+replicaCount: 1
+
+image:
+  repository: "us-docker.pkg.dev/my-project/images-repo/pubsub-backend"
+  tag: "v1"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+resources:
+  limits:
+    cpu: "1"
+    memory: "1Gi"
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+
+# Environment variables for runtime
+env:
+  CHUNK_URL: "CHUNK_URL_PLACEHOLDER"
+  VECTOR_DB_ENDPOINT: "VECTOR_DB_ENDPOINT_PLACEHOLDER"
+  DEPLOYED_INDEX_ID: "DEPLOYED_INDEX_ID_PLACEHOLDER"
+  MEMORY_STORE_HOST: "MEMORY_STORE_HOST_PLACEHOLDER"
+  MEMORY_STORE_PORT: "MEMORY_STORE_PORT_PLACEHOLDER"
+  EMBEDDING_ENDPOINT: "EMBEDDING_ENDPOINT_PLACEHOLDER"
+  PROJECT_ID: "PROJECT_ID_PLACEHOLDER"
+  REGION: "REGION_PLACEHOLDER"
+
+
+# Probe settings
+probe:
+  initialDelaySeconds: 10
+  periodSeconds: 15
+  timeoutSeconds: 5
+
+# Optional ingress
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: pubsub-backend.example.com
+      paths:
+        - /
+  tls: []
+
+
+# horizontal pod autoscaler (optional)
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70

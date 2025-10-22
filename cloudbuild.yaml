@@ -1,0 +1,83 @@
+# cloudbuild.yaml
+substitutions:
+  _ART_HOST: "us-docker.pkg.dev"
+  _REPO: "HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP"
+  _PROJECT_ID: "rock-task-468906-n1"
+  _GITLAB_PROJ_ID: "75520343"    # numeric id
+  _GITLAB_REF: "main"
+  # GitLab trigger token stored in Secret Manager OR passed as substitution/env
+  # recommend: store in Secret Manager and access via secretEnv below
+
+steps:
+# Build & push admin backend
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'build-admin-backend'
+  args: ['build', '-t', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA', './Admin_Backend']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-admin-backend'
+  args: ['push', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA']
+
+# Build & push users backend
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'build-users-backend'
+  args: ['build', '-t', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/users-backend:$SHORT_SHA', './Users_Backend']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-users-backend'
+  args: ['push', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/users-backend:$SHORT_SHA']
+
+# Build & push chunk function
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'build-chunk'
+  args: ['build', '-t', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/chunk-func:$SHORT_SHA', './Chunk_Function']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-chunk'
+  args: ['push', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/chunk-func:$SHORT_SHA']
+
+# Build & push admin frontend
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'build-admin-frontend'
+  args: ['build', '-t', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA', './Admin_Frontend']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-admin-frontend'
+  args: ['push', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA']
+
+# Build & push user frontend (added step)
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'build-user-frontend'
+  args: ['build', '-t', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA', './User_Frontend']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-user-frontend'
+  args: ['push', '${_ART_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA']
+
+# Trigger GitLab CI/CD (CD) via Pipeline Trigger
+# We assume token is stored in Secret Manager as "gitlab-trigger-token"
+- name: 'curlimages/curl'
+  id: 'trigger-gitlab'
+  entrypoint: 'sh'
+  secretEnv: ['GITLAB_TRIGGER_TOKEN']
+  args:
+    - '-c'
+    - |
+      echo "Triggering GitLab pipeline..."
+      API="https://gitlab.com/api/v4/projects/${_GITLAB_PROJ_ID}/trigger/pipeline"
+      curl -X POST \
+        -F token="$GITLAB_TRIGGER_TOKEN" \
+        -F ref="${_GITLAB_REF}" \
+        -F "variables[IMAGE_TAG]=$SHORT_SHA" \
+        -F "variables[ARTIFACT_HOST]=${_ART_HOST}" \
+        -F "variables[REPO]=${_REPO}" \
+        $API
+
+# specify images (optional)
+images:
+- "${_ART_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA"
+- "${_ART_HOST}/${_PROJECT_ID}/${_REPO}/users-backend:$SHORT_SHA"
+- "${_ART_HOST}/${_PROJECT_ID}/${_REPO}/chunk-func:$SHORT_SHA"
+- "${_ART_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA"
+- "${_ART_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA"  # added image
+
+# Secrets mapping (Cloud Build will fetch secret value into env var)
+availableSecrets:
+  secretManager:
+  - versionName: "projects/YOUR_GCP_PROJECT/secrets/gitlab-trigger-token/versions/latest"
+    env: "GITLAB_TRIGGER_TOKEN"
