@@ -1,10 +1,10 @@
 replicaCount: 2
 
 image:
-  repository: "us-docker.pkg.dev/my-project/images-repo/user-backend"
-  tag: "v1"
+  repository: ""
+  tag: ""
   pullPolicy: IfNotPresent
-
+  
 service:
   type: ClusterIP
   port: 8080
@@ -26,7 +26,6 @@ env:
   DEPLOYED_INDEX_ID: "DEPLOYED_INDEX_ID_PLACEHOLDER"
   MEMORY_STORE_HOST: "MEMORY_STORE_HOST_PLACEHOLDER"
   MEMORY_STORE_PORT: "MEMORY_STORE_PORT_PLACEHOLDER"
-  MEMORY_STORE_PASSWORD_SECRET: "redis-password"
   PROJECT_ID: "PROJECT_ID_PLACEHOLDER"
   REGION: "REGION_PLACEHOLDER"
   LLM_MODEL_ID: "gemini-2.0-flash"

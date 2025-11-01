@@ -6,6 +6,23 @@ resource "google_artifact_registry_repository" "images_repo" {
   format        = "DOCKER"
 }
 
+data "google_secret_manager_secret_version" "vault_token" {
+  project = var.project_id
+  secret  = "vault_secret"        
+  version = "latest"
+}
+
+provider "vault" {
+  address = "http://127.0.0.1:8200"
+  token   = data.google_secret_manager_secret_version.vault_token.secret_data
+}
+
+
+data "vault_kv_secret_v2" "git_credentials" {
+  mount = "secret"
+  name  = "git-credentials"
+}
+
 
 # Vector DB / Matching Engine Index
 resource "google_vertex_ai_index" "rag_index" {
@@ -90,7 +107,7 @@ resource "null_resource" "update_admin_backend_values" {
     module.chunk_cloud_run
   ]
 }
-
+/* 
 resource "null_resource" "helm_deploy_user_backend" {
   provisioner "local-exec" {
     command = <<EOT
@@ -118,6 +135,36 @@ resource "null_resource" "helm_deploy_admin_backend" {
 
   depends_on = [null_resource.update_admin_backend_values]
 }
+ */
+
+resource "null_resource" "push_helm_updates_to_github" {
+  provisioner "local-exec" {
+    command = <<EOT
+set -euo pipefail
+echo "=== Committing and pushing Helm updates to GitHub ==="
+
+# Configure Git identity
+git config user.email "mohamed.2714104@gmail.com"
+git config user.name "${data.vault_kv_secret_v2.git_credentials.data["username"]}"
+
+# Commit Helm changes (if any)
+git add ../helm/ || true
+git commit -m "Auto-update Helm values.yaml via Terraform" || echo "No changes to commit"
+
+# Push using Vault GitHub token (in memory only)
+echo "Pushing changes securely via HTTPS..."
+git push "https://${data.vault_kv_secret_v2.git_credentials.data["username"]}:${data.vault_kv_secret_v2.git_credentials.data["token"]}@github.com/${var.git_repo_owner}/${var.git_repo_name}.git" main || echo "No changes to push"
+
+echo "=== Push completed ==="
+EOT
+    interpreter = ["bash", "-c"]
+  }
+
+  depends_on = [
+    null_resource.update_user_backend_values,
+    null_resource.update_admin_backend_values
+  ]
+}
 
 resource "google_cloudbuild_trigger" "build_all_images" {
   name        = "build-rag-images"
@@ -126,7 +173,6 @@ resource "google_cloudbuild_trigger" "build_all_images" {
   github {
     owner = var.git_repo_owner
     name  = var.git_repo_name
-
     push {
       branch = var.cloudbuild_branch
     }
@@ -138,5 +184,8 @@ resource "google_cloudbuild_trigger" "build_all_images" {
     _ARTIFACT_REG_HOST = "${var.region}-docker.pkg.dev"
     _REPO              = google_artifact_registry_repository.images_repo.repository_id
     _PROJECT_ID        = var.project_id
+    _GITLAB_PROJ_ID    = var.gitlab_project_id
+    _GITLAB_REF        = var.gitlab_ref
   }
 }
+
