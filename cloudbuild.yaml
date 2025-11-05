@@ -1,3 +1,4 @@
+logsBucket: gs://${_PROJECT_ID}-build-logs    
 
 steps:
 # Build & push admin backend
