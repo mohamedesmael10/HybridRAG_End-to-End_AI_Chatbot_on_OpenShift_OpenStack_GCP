@@ -42,31 +42,31 @@ steps:
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA']
 
 # Trigger GitLab CI/CD (CD) via Pipeline Trigger
-- name: 'curlimages/curl'
-  id: 'trigger-gitlab'
-  entrypoint: 'sh'
-  secretEnv: ['GITLAB_TRIGGER_TOKEN']
-  args:
-    - '-c'
-    - |
-      echo "Triggering GitLab pipeline..."
-      API="https://gitlab.com/api/v4/projects/${_GITLAB_PROJ_ID}/trigger/pipeline"
-      curl -X POST \
-        -F token="$GITLAB_TRIGGER_TOKEN" \
-        -F ref="${_GITLAB_REF}" \
-        -F "variables[IMAGE_TAG]=$SHORT_SHA" \
-        -F "variables[ARTIFACT_HOST]=${_ARTIFACT_REG_HOST}" \
-        -F "variables[REPO]=${_REPO}" \
-        $API
+# - name: 'curlimages/curl'
+#   id: 'trigger-gitlab'
+#   entrypoint: 'sh'
+#   secretEnv: ['GITLAB_TRIGGER_TOKEN']
+#   args:
+#     - '-c'
+#     - |
+#       echo "Triggering GitLab pipeline..."
+#       API="https://gitlab.com/api/v4/projects/${_GITLAB_PROJ_ID}/trigger/pipeline"
+#       curl -X POST \
+#         -F token="$GITLAB_TRIGGER_TOKEN" \
+#         -F ref="${_GITLAB_REF}" \
+#         -F "variables[IMAGE_TAG]=$SHORT_SHA" \
+#         -F "variables[ARTIFACT_HOST]=${_ARTIFACT_REG_HOST}" \
+#         -F "variables[REPO]=${_REPO}" \
+#         $API
 
-images:
-- "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA"
-- "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:$SHORT_SHA"
-- "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/chunk-image:$SHORT_SHA"
-- "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA"
-- "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA"
+# images:
+# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA"
+# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:$SHORT_SHA"
+# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/chunk-image:$SHORT_SHA"
+# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA"
+# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA"
 
-availableSecrets:
-  secretManager:
-  - versionName: "projects/YOUR_GCP_PROJECT/secrets/gitlab-trigger-token/versions/latest"
-    env: "GITLAB_TRIGGER_TOKEN"
+# availableSecrets:
+#   secretManager:
+#   - versionName: "projects/YOUR_GCP_PROJECT/secrets/gitlab-trigger-token/versions/latest"
+#     env: "GITLAB_TRIGGER_TOKEN"
