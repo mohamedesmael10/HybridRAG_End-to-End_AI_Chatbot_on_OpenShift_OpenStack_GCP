@@ -70,3 +70,4 @@ steps:
 #   secretManager:
 #   - versionName: "projects/YOUR_GCP_PROJECT/secrets/gitlab-trigger-token/versions/latest"
 #     env: "GITLAB_TRIGGER_TOKEN"
+#
