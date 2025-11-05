@@ -167,28 +167,29 @@ resource "null_resource" "helm_deploy_admin_backend" {
 # }
 resource "google_cloudbuild_trigger" "build_all_images" {
   name        = "build-rag-images"
-  description = "Build and push Docker images on push to branch ${var.cloudbuild_branch}"
+  description = "Build and push Docker images on push to branch main"
+  location    = "us-central1"
+  project     = var.project_id
 
-  github {
-    owner = var.git_repo_owner
-    name  = var.git_repo_name
+  repository_event_config {
+    repository = "projects/rock-task-468906-n1/locations/us-central1/connections/mohamedesmael10/repositories/mohamedesmael10-HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP"
 
     push {
-      branch = var.cloudbuild_branch
+      branch = "main"
     }
   }
 
-  filename = "cloudbuild.yaml"
+  filename         = "cloudbuild.yaml"
+  service_account  = google_service_account.cloudbuild_service_account.id
 
   substitutions = {
     _ARTIFACT_REG_HOST = "${var.region}-docker.pkg.dev"
     _REPO              = google_artifact_registry_repository.images_repo.repository_id
     _PROJECT_ID        = var.project_id
-    _GITLAB_PROJ_ID    = var.gitlab_project_id
-    _GITLAB_REF        = var.gitlab_ref
   }
 
   depends_on = [
-    google_artifact_registry_repository.images_repo
+    google_artifact_registry_repository.images_repo,
+    google_service_account.cloudbuild_service_account
   ]
 }

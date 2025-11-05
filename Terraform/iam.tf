@@ -71,3 +71,28 @@ module "admin_frontend_sa" {
         "roles/storage.objectViewer"
     ]
 }
+
+resource "google_service_account" "cloudbuild_service_account" {
+  account_id   = "cloudbuild-sa"
+  display_name = "Cloud Build Service Account"
+  description  = "Service Account used by Cloud Build Trigger"
+}
+
+# Grant required roles
+resource "google_project_iam_member" "cloudbuild_sa_user" {
+  project = var.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${google_service_account.cloudbuild_service_account.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_sa_logs" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.cloudbuild_service_account.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_sa_artifact" {
+  project = var.project_id
+  role    = "roles/artifactregistry.writer"
+  member  = "serviceAccount:${google_service_account.cloudbuild_service_account.email}"
+}
