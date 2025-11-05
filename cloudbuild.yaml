@@ -41,7 +41,7 @@ steps:
   id: 'push-user-frontend'
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA']
 
-# Trigger GitLab CI/CD (CD) via Pipeline Trigger
+# # Trigger GitLab CI/CD (CD) via Pipeline Trigger
 # - name: 'curlimages/curl'
 #   id: 'trigger-gitlab'
 #   entrypoint: 'sh'
@@ -70,4 +70,3 @@ steps:
 #   secretManager:
 #   - versionName: "projects/YOUR_GCP_PROJECT/secrets/gitlab-trigger-token/versions/latest"
 #     env: "GITLAB_TRIGGER_TOKEN"
-

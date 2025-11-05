@@ -23,6 +23,10 @@ data "vault_kv_secret_v2" "git_credentials" {
   name  = "git-credentials"
 }
 
+data "google_secret_manager_secret_version" "GITLAB" {
+  secret  = "GITLAB"
+  project = var.project_id
+}
 
 # Vector DB / Matching Engine Index
 resource "google_vertex_ai_index" "rag_index" {
@@ -165,6 +169,29 @@ resource "null_resource" "helm_deploy_admin_backend" {
 #     null_resource.update_admin_backend_values
 #   ]
 # }
+data "google_project" "project" {
+  project_id = var.project_id
+}
+
+resource "google_storage_bucket" "cloudbuild_logs" {
+  name                        = "${var.project_id}-build-logs"
+  location                    = "US"
+  uniform_bucket_level_access = true
+
+  versioning { enabled = false }
+
+  lifecycle_rule {
+    action { type = "Delete" }
+    condition { age = 30 }
+  }
+
+  labels = {
+    environment = "build-logs"
+    managed_by  = "terraform"
+  }
+}
+
+
 resource "google_cloudbuild_trigger" "build_all_images" {
   name        = "build-rag-images"
   description = "Build and push Docker images on push to branch main"
@@ -188,10 +215,12 @@ resource "google_cloudbuild_trigger" "build_all_images" {
     _PROJECT_ID        = var.project_id
     _GITLAB_PROJ_ID    = var.gitlab_project_id
     _GITLAB_REF        = var.gitlab_ref
+    _GITLAB_TRIGGER_TOKEN = data.google_secret_manager_secret_version.GITLAB.secret_data
+  
   }
-
-  depends_on = [
+   depends_on = [
     google_artifact_registry_repository.images_repo,
-    google_service_account.cloudbuild_service_account
+    google_service_account.cloudbuild_service_account,
+    google_storage_bucket.cloudbuild_logs
   ]
 }

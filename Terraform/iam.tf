@@ -96,3 +96,33 @@ resource "google_project_iam_member" "cloudbuild_sa_artifact" {
   role    = "roles/artifactregistry.writer"
   member  = "serviceAccount:${google_service_account.cloudbuild_service_account.email}"
 }
+
+resource "google_storage_bucket_iam_member" "sa_bucket_writer" {
+  bucket = google_storage_bucket.cloudbuild_logs.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.cloudbuild_service_account.email}"
+}
+
+resource "google_service_account_iam_member" "allow_build_service_to_impersonate" {
+  service_account_id = google_service_account.cloudbuild_service_account.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-cloudbuild.iam.gserviceaccount.com"
+}
+
+resource "google_storage_bucket_iam_member" "cloudbuild_logs_writer" {
+  bucket = google_storage_bucket.cloudbuild_logs.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.cloudbuild_service_account.email}"
+}
+
+resource "google_storage_bucket_iam_member" "cloudbuild_sa_storage_object_admin" {
+  bucket = "rock-task-468906-n1-build-logs"
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:cloudbuild-sa@rock-task-468906-n1.iam.gserviceaccount.com"
+}
+
+resource "google_storage_bucket_iam_member" "cloudbuild_sa_storage_admin" {
+  bucket = "rock-task-468906-n1-build-logs"
+  role   = "roles/storage.admin"
+  member = "serviceAccount:cloudbuild-sa@rock-task-468906-n1.iam.gserviceaccount.com"
+}
