@@ -179,13 +179,15 @@ resource "google_cloudbuild_trigger" "build_all_images" {
     }
   }
 
-  filename         = "cloudbuild.yaml"
-  service_account  = google_service_account.cloudbuild_service_account.id
+  filename        = "cloudbuild.yaml"
+  service_account = google_service_account.cloudbuild_service_account.id
 
   substitutions = {
     _ARTIFACT_REG_HOST = "${var.region}-docker.pkg.dev"
     _REPO              = google_artifact_registry_repository.images_repo.repository_id
     _PROJECT_ID        = var.project_id
+    _GITLAB_PROJ_ID    = var.gitlab_project_id
+    _GITLAB_REF        = var.gitlab_ref
   }
 
   depends_on = [
