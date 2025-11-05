@@ -62,11 +62,11 @@ resource "google_vertex_ai_index_endpoint_deployed_index" "rag_deployed" {
   max_replica_count = 1
  }
 }
-
+#      sed -i 's|CHUNK_URL_PLACEHOLDER|${module.chunk_cloud_run.cloud_run_endpoint}|g' ./helm/user-backend/values.yaml
+/* 
 resource "null_resource" "update_user_backend_values" {
   provisioner "local-exec" {
     command = <<EOT
-      sed -i 's|CHUNK_URL_PLACEHOLDER|${module.chunk_cloud_run.cloud_run_endpoint}|g' ./helm/user-backend/values.yaml
       sed -i 's|VECTOR_DB_ENDPOINT_PLACEHOLDER|https://${google_vertex_ai_index_endpoint.rag_endpoint.public_endpoint_domain_name}/v1/projects/${var.project_id}/locations/${var.region}/indexEndpoints/${google_vertex_ai_index_endpoint.rag_endpoint.name}:findNeighbors|g' ./helm/user-backend/values.yaml
       sed -i 's|DEPLOYED_INDEX_ID_PLACEHOLDER|${google_vertex_ai_index_endpoint_deployed_index.rag_deployed.deployed_index_id}|g' ./helm/user-backend/values.yaml
       sed -i 's|MEMORY_STORE_HOST_PLACEHOLDER|${google_redis_instance.user_memory_store.host}|g' ./helm/user-backend/values.yaml
@@ -79,17 +79,17 @@ resource "null_resource" "update_user_backend_values" {
   }
 
   depends_on = [
-    google_vertex_ai_index_endpoint_deployed_index.rag_deployed,
-    google_redis_instance.user_memory_store,
-    module.chunk_cloud_run
-  ]
+  google_vertex_ai_index_endpoint_deployed_index.rag_deployed,
+  google_redis_instance.user_memory_store
+]
+
 }
 
+#       sed -i 's|CHUNK_URL_PLACEHOLDER|${module.chunk_cloud_run.cloud_run_endpoint}|g' ./helm/admin-backend/values.yaml
 
 resource "null_resource" "update_admin_backend_values" {
   provisioner "local-exec" {
     command = <<EOT
-      sed -i 's|CHUNK_URL_PLACEHOLDER|${module.chunk_cloud_run.cloud_run_endpoint}|g' ./helm/admin-backend/values.yaml
       sed -i 's|VECTOR_DB_ENDPOINT_PLACEHOLDER|https://${google_vertex_ai_index_endpoint.rag_endpoint.public_endpoint_domain_name}/v1/projects/${var.project_id}/locations/${var.region}/indexEndpoints/${google_vertex_ai_index_endpoint.rag_endpoint.name}:upsertDatapoints|g' ./helm/admin-backend/values.yaml
       sed -i 's|DEPLOYED_INDEX_ID_PLACEHOLDER|${google_vertex_ai_index_endpoint_deployed_index.rag_deployed.deployed_index_id}|g' ./helm/admin-backend/values.yaml
       sed -i 's|MEMORY_STORE_HOST_PLACEHOLDER|${google_redis_instance.user_memory_store.host}|g' ./helm/admin-backend/values.yaml
@@ -102,11 +102,11 @@ resource "null_resource" "update_admin_backend_values" {
   }
 
   depends_on = [
-    google_vertex_ai_index_endpoint_deployed_index.rag_deployed,
-    google_redis_instance.user_memory_store,
-    module.chunk_cloud_run
-  ]
-}
+  google_vertex_ai_index_endpoint_deployed_index.rag_deployed,
+  google_redis_instance.user_memory_store
+]
+
+} */
 /* 
 resource "null_resource" "helm_deploy_user_backend" {
   provisioner "local-exec" {
@@ -137,35 +137,34 @@ resource "null_resource" "helm_deploy_admin_backend" {
 }
  */
 
-resource "null_resource" "push_helm_updates_to_github" {
-  provisioner "local-exec" {
-    command = <<EOT
-set -euo pipefail
-echo "=== Committing and pushing Helm updates to GitHub ==="
+# resource "null_resource" "push_helm_updates_to_github" {
+#   provisioner "local-exec" {
+#     command = <<EOT
+# set -euo pipefail
+# echo "=== Committing and pushing Helm updates to GitHub ==="
 
-# Configure Git identity
-git config user.email "mohamed.2714104@gmail.com"
-git config user.name "${data.vault_kv_secret_v2.git_credentials.data["username"]}"
+# # Configure Git identity
+# git config user.email "mohamed.2714104@gmail.com"
+# git config user.name "${data.vault_kv_secret_v2.git_credentials.data["username"]}"
 
-# Commit Helm changes (if any)
-git add ../helm/ || true
-git commit -m "Auto-update Helm values.yaml via Terraform" || echo "No changes to commit"
+# # Commit Helm changes (if any)
+# git add ../helm/ || true
+# git commit -m "Auto-update Helm values.yaml via Terraform" || echo "No changes to commit"
 
-# Push using Vault GitHub token (in memory only)
-echo "Pushing changes securely via HTTPS..."
-git push "https://${data.vault_kv_secret_v2.git_credentials.data["username"]}:${data.vault_kv_secret_v2.git_credentials.data["token"]}@github.com/${var.git_repo_owner}/${var.git_repo_name}.git" main || echo "No changes to push"
+# # Push using Vault GitHub token (in memory only)
+# echo "Pushing changes securely via HTTPS..."
+# git push "https://${data.vault_kv_secret_v2.git_credentials.data["username"]}:${data.vault_kv_secret_v2.git_credentials.data["token"]}@github.com/${var.git_repo_owner}/${var.git_repo_name}.git" main || echo "No changes to push"
 
-echo "=== Push completed ==="
-EOT
-    interpreter = ["bash", "-c"]
-  }
+# echo "=== Push completed ==="
+# EOT
+#     interpreter = ["bash", "-c"]
+#   }
 
-  depends_on = [
-    null_resource.update_user_backend_values,
-    null_resource.update_admin_backend_values
-  ]
-}
-
+#   depends_on = [
+#     null_resource.update_user_backend_values,
+#     null_resource.update_admin_backend_values
+#   ]
+# }
 resource "google_cloudbuild_trigger" "build_all_images" {
   name        = "build-rag-images"
   description = "Build and push Docker images on push to branch ${var.cloudbuild_branch}"
@@ -173,6 +172,7 @@ resource "google_cloudbuild_trigger" "build_all_images" {
   github {
     owner = var.git_repo_owner
     name  = var.git_repo_name
+
     push {
       branch = var.cloudbuild_branch
     }
@@ -187,5 +187,8 @@ resource "google_cloudbuild_trigger" "build_all_images" {
     _GITLAB_PROJ_ID    = var.gitlab_project_id
     _GITLAB_REF        = var.gitlab_ref
   }
-}
 
+  depends_on = [
+    google_artifact_registry_repository.images_repo
+  ]
+}

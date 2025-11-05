@@ -25,5 +25,5 @@ resource "google_firestore_database" "matedata_db" {
   name        = var.firestore_db_name
   project     = var.project_id
   location_id = var.region
-  type        = "NATIVE"
+  type        = "FIRESTORE_NATIVE"
 }
