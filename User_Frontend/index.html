@@ -1,12 +1,18 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>RAG Frontend</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>esmael ai</title>
 </head>
 <body>
-<div id="root"></div>
-<script type="module" src="/src/main.jsx"></script>
+  <div id="root"></div>
+
+  <!-- runtime placeholder the Docker entrypoint can replace -->
+  <script>
+    window.__RAG_API_URL__ = '';
+  </script>
+
+  <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>

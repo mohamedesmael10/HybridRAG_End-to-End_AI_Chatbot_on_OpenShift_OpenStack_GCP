@@ -1,18 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "pubsub-backend.fullname" . }}
+  name: {{ include "admin-backend.fullname" . }}
   labels:
-    app: {{ include "pubsub-backend.name" . }}
+    app: {{ include "admin-backend.name" . }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: {{ include "pubsub-backend.name" . }}
+      app: {{ include "admin-backend.name" . }}
   template:
     metadata:
       labels:
-        app: {{ include "pubsub-backend.name" . }}
+        app: {{ include "admin-backend.name" . }}
     spec:
       containers:
         - name: pubsub-backend

@@ -1,0 +1,44 @@
+replicaCount: 1
+
+image:
+  repository: "gcr.io/my-project/admin-frontend" # set by CD
+  tag: "latest"                                 # set by CD
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+resources:
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+  requests:
+    cpu: "100m"
+    memory: "64Mi"
+
+env:
+  # VITE_API_URL is a build-time variable but we provide it here for convenience
+  VITE_API_URL: "/api"
+  ADMIN_CLOUD_RUN_URL: "/api"
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: frontend.example.com
+      paths:
+        - /
+  tls: []
+
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+nodeSelector: {}
+
+tolerations: []

@@ -1,16 +1,17 @@
-# Stage 1 - build
-FROM node:20-alpine AS build
+FROM python:3.12-slim AS builder
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm ci --silent
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY --from=builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
+
 COPY . .
-RUN npm run build
 
-# Stage 2 - serve with nginx
-FROM nginx:stable-alpine
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Don't bake secrets
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8080
 
-# allow passing API URL at runtime as env var
-ENV VITE_API_URL=""
-CMD ["/bin/sh","-c","if [ -n \"$VITE_API_URL\" ]; then sed -i \"s|window.__RAG_API_URL__ = ''|window.__RAG_API_URL__ = '$VITE_API_URL'|g\" /usr/share/nginx/html/index.html; fi && nginx -g 'daemon off;'"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

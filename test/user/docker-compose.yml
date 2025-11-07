@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-net
+    volumes:
+      - redis-data:/data
+
+  backend:
+    build:
+      context: ./User_Backend
+      dockerfile: Dockerfile
+    container_name: user-backend
+    ports:
+      - "9080:8080"   # host:container
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: "/app/keys/rock-task-468906-n1-7263e54c7ecd.json"
+      EMBEDDING_ENDPOINT: "https://us-central1-aiplatform.googleapis.com/v1/projects/rock-task-468906-n1/locations/us-central1/publishers/google/models/text-embedding-004:predict"
+      CHUNK_URL: "https://chunk-cloud-run-hvhamjpnfa-uc.a.run.app"
+      VECTOR_DB_ENDPOINT: "https://414655799.us-central1-659382455534.vdb.vertexai.goog/v1/projects/rock-task-468906-n1/locations/us-central1/indexEndpoints/4869712810164092928:findNeighbors"
+      VECTOR_DB_ENDPOINT_UPSERT: "https://414655799.us-central1-659382455534.vdb.vertexai.goog/v1/projects/rock-task-468906-n1/locations/us-central1/indexEndpoints/4869712810164092928:upsertDatapoints"
+      DEPLOYED_INDEX_ID: "rag_index_01"
+      PROJECT_ID: "rock-task-468906-n1"
+      REGION: "us-central1"
+      LLM_MODEL_I: "gemini-2.5-flash"
+      LLM_ENDPOINT: "https://us-central1-aiplatform.googleapis.com/v1/projects/rock-task-468906-n1/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent"
+
+      MEMORY_STORE_HOST: "redis"
+      MEMORY_STORE_PORT: "6379"
+    volumes:
+      - /home/esmael/Downloads/rock-task-468906-n1-7263e54c7ecd.json:/app/keys/rock-task-468906-n1-7263e54c7ecd.json:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-net
+
+  frontend:
+    build:
+      context: ./User_Frontend
+      dockerfile: Dockerfile
+      args:
+        # keep build-time default (use internal proxy path)
+        VITE_API_URL: "/api"
+    container_name: user-frontend
+    ports:
+      - "4000:80"
+    environment:
+      # leave ADMIN_CLOUD_RUN_URL empty for local usage (used only if you want the frontend to call an external cloud-run admin service)
+      ADMIN_CLOUD_RUN_URL: ""
+    depends_on:
+      - backend
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge
+
+volumes:
+  redis-data:

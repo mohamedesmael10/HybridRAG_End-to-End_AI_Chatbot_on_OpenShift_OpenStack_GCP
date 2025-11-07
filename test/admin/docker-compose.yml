@@ -1,0 +1,39 @@
+services:
+  backend:
+    build: ./Admin_Backend
+    container_name: admin-backend
+    ports:
+      - "8085:8080"
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: "/app/keys/rock-task-468906-n1-7263e54c7ecd.json"
+      EMBEDDING_ENDPOINT: "https://us-central1-aiplatform.googleapis.com/v1/projects/rock-task-468906-n1/locations/us-central1/publishers/google/models/text-embedding-004:predict"
+      CHUNK_URL: "https://chunk-cloud-run-hvhamjpnfa-uc.a.run.app"
+      VECTOR_DB_ENDPOINT_FIND_NEIGHBORS: "https://414655799.us-central1-659382455534.vdb.vertexai.goog/v1/projects/rock-task-468906-n1/locations/us-central1/indexEndpoints/4869712810164092928:findNeighbors"
+      VECTOR_DB_ENDPOINT_UPSERT: "https://414655799.us-central1-659382455534.vdb.vertexai.goog/v1/projects/rock-task-468906-n1/locations/us-central1/indexEndpoints/4869712810164092928:upsertDatapoints"
+      DEPLOYED_INDEX_ID: "rag_index_01"
+      PROJECT_ID: "rock-task-468906-n1"
+      REGION: "us-central1"
+    volumes:
+      - /home/esmael/Downloads/rock-task-468906-n1-7263e54c7ecd.json:/app/keys/rock-task-468906-n1-7263e54c7ecd.json:ro
+    networks:
+      - app-net
+
+
+  frontend:
+    build:
+      context: ./Admin_Frontend
+      args:
+        VITE_API_URL: "/api"
+    container_name: admin-frontend
+    ports:
+      - "8086:80"
+    environment:
+      ADMIN_CLOUD_RUN_URL: "/api"
+    depends_on:
+      - backend
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge

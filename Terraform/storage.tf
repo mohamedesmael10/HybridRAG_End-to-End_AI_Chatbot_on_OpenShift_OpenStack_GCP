@@ -26,4 +26,9 @@ resource "google_firestore_database" "matedata_db" {
   project     = var.project_id
   location_id = var.region
   type        = "FIRESTORE_NATIVE"
+
+  lifecycle {
+    prevent_destroy = true       
+    ignore_changes   = all      
+  }
 }

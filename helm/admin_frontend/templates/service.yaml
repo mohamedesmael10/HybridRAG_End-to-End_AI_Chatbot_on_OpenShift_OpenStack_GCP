@@ -1,7 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{  include "admin-backend.fullname" .}}
+  name: {{ .Release.Name }}-frontend
+  labels:
+    app: {{ .Release.Name }}-frontend
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -10,4 +12,4 @@ spec:
       protocol: TCP
       name: http
   selector:
-    app: {{ include "admin-backend.name" . }}
+    app: {{ .Release.Name }}-frontend

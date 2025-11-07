@@ -115,14 +115,19 @@ resource "google_storage_bucket_iam_member" "cloudbuild_logs_writer" {
   member = "serviceAccount:${google_service_account.cloudbuild_service_account.email}"
 }
 
+
 resource "google_storage_bucket_iam_member" "cloudbuild_sa_storage_object_admin" {
-  bucket = "rock-task-468906-n1-build-logs"
+  bucket = google_storage_bucket.cloudbuild_logs.name
   role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:cloudbuild-sa@rock-task-468906-n1.iam.gserviceaccount.com"
+  member = "serviceAccount:${google_service_account.cloudbuild_service_account.email}"
+
+  depends_on = [google_storage_bucket.cloudbuild_logs]
 }
 
 resource "google_storage_bucket_iam_member" "cloudbuild_sa_storage_admin" {
-  bucket = "rock-task-468906-n1-build-logs"
+  bucket = google_storage_bucket.cloudbuild_logs.name
   role   = "roles/storage.admin"
-  member = "serviceAccount:cloudbuild-sa@rock-task-468906-n1.iam.gserviceaccount.com"
+  member = "serviceAccount:${google_service_account.cloudbuild_service_account.email}"
+
+  depends_on = [google_storage_bucket.cloudbuild_logs]
 }

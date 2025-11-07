@@ -38,20 +38,79 @@ export default function App(){
     }
   }
 
+  // --- sendQuestion now uses fetch so we can read streaming responses if present
   async function sendQuestion(e){
     e && e.preventDefault()
     const q = question.trim()
     if(!q) return
-    const entry = {id: Date.now(), question: q, answer: null, status: 'pending'}
+    const entry = {id: Date.now(), question: q, answer: '', status: 'pending'}
     setHistory(h => [entry, ...h])
     setQuestion('')
     setLoading(true)
+
+    const url = `${API_BASE.replace(/\/$/,'')}/ask`
+    // timeout in ms for the request (adjust as needed)
+    const REQ_TIMEOUT = 120000
+    const controller = new AbortController()
+    const timeoutId = setTimeout(()=> controller.abort(), REQ_TIMEOUT)
+
     try{
-      const res = await axios.post(`${API_BASE.replace(/\/$/,'')}/ask`, {question: q}, {timeout: 60000})
-      const answer = res.data.answer || JSON.stringify(res.data)
-      setHistory(h => h.map(x => x.id===entry.id ? {...x, answer, status:'done'} : x))
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ question: q }),
+        signal: controller.signal
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!res.ok) {
+        // try read JSON error or text
+        let detail = await res.text().catch(()=> null)
+        try {
+          const j = JSON.parse(detail)
+          detail = j.detail || j.error || JSON.stringify(j)
+        } catch(_) {}
+        throw new Error(detail || `HTTP ${res.status}`)
+      }
+
+      const contentType = (res.headers.get('content-type') || '').toLowerCase()
+
+      if (contentType.includes('application/json')) {
+        // non-streaming: parse whole JSON
+        const data = await res.json()
+        const answer = typeof data.answer === 'string' ? data.answer : JSON.stringify(data.answer, null, 2)
+        setHistory(h => h.map(x => x.id===entry.id ? {...x, answer, status:'done'} : x))
+      } else {
+        // streaming or plain text: read the response body progressively
+        if (!res.body) {
+          // fallback: read as text if no body stream available
+          const txt = await res.text()
+          setHistory(h => h.map(x => x.id===entry.id ? {...x, answer: txt, status:'done'} : x))
+        } else {
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let done = false
+          let full = ''
+          // update UI progressively
+          while (!done) {
+            const { value, done: streamDone } = await reader.read()
+            done = streamDone
+            if (value) {
+              const chunk = decoder.decode(value, { stream: true })
+              full += chunk
+              // incremental update
+              setHistory(h => h.map(x => x.id===entry.id ? {...x, answer: full, status:'pending'} : x))
+            }
+          }
+          // final commit
+          setHistory(h => h.map(x => x.id===entry.id ? {...x, answer: full, status:'done'} : x))
+        }
+      }
     }catch(err){
-      const detail = err.response?.data?.detail || err.message
+      clearTimeout(timeoutId)
+      const isAbort = err.name === 'AbortError'
+      const detail = isAbort ? `Request timed out after ${REQ_TIMEOUT/1000}s` : (err.message || String(err))
       setHistory(h => h.map(x => x.id===entry.id ? {...x, answer: `Error: ${detail}`, status:'error'} : x))
     }finally{
       setLoading(false)

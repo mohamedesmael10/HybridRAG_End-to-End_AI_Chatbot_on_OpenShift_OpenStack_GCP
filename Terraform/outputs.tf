@@ -50,4 +50,40 @@
 # output "index_endpoint" {
 #   value = google_vertex_ai_index_endpoint.rag_endpoint.name
 # }
+# ---- corrected outputs ----
 
+output "embedding_endpoint" {
+  description = "Embedding API endpoint (Text embeddings predict)"
+  value       = "https://${var.region}-aiplatform.googleapis.com/v1/projects/${var.project_id}/locations/${var.region}/publishers/google/models/text-embedding-004:predict"
+}
+
+output "chunk_url" {
+  description = "URL of the chunk processing service (Cloud Run module output)"
+  # use the module output (module must expose cloud_run_endpoint)
+  value       = try(module.chunk_cloud_run.cloud_run_endpoint, "")
+}
+
+output "vector_db_endpoint_find_neighbors" {
+  description = "Vertex AI MatchingEngine findNeighbors endpoint (public domain)"
+  value       = "https://${google_vertex_ai_index_endpoint.rag_endpoint.public_endpoint_domain_name}/v1/projects/${var.project_id}/locations/${var.region}/indexEndpoints/${google_vertex_ai_index_endpoint.rag_endpoint.name}:findNeighbors"
+}
+
+output "vector_db_endpoint_upsert" {
+  description = "Vertex AI MatchingEngine upsertDatapoints endpoint"
+  value       = "https://${google_vertex_ai_index_endpoint.rag_endpoint.public_endpoint_domain_name}/v1/projects/${var.project_id}/locations/${var.region}/indexEndpoints/${google_vertex_ai_index_endpoint.rag_endpoint.name}:upsertDatapoints"
+}
+
+output "deployed_index_id" {
+  description = "Deployed index ID"
+  value       = google_vertex_ai_index_endpoint_deployed_index.rag_deployed.deployed_index_id
+}
+
+output "project_id" {
+  description = "Project ID"
+  value       = var.project_id
+}
+
+output "region" {
+  description = "Region"
+  value       = var.region
+}

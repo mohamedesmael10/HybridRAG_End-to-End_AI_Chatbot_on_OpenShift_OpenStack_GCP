@@ -29,16 +29,18 @@ data "google_secret_manager_secret_version" "GITLAB" {
 }
 
 # Vector DB / Matching Engine Index
+
 resource "google_vertex_ai_index" "rag_index" {
   display_name        = "rag_index_01"
   region              = var.region
   index_update_method = "BATCH_UPDATE"
+
   metadata {
     config {
       algorithm_config {
         tree_ah_config {
-          leaf_node_embedding_count = 1000
-          leaf_nodes_to_search_percent = 10
+          leaf_node_embedding_count     = 1000
+          leaf_nodes_to_search_percent  = 10
         }
       }
       dimensions                  = 1536
@@ -51,21 +53,27 @@ resource "google_vertex_ai_index" "rag_index" {
 resource "google_vertex_ai_index_endpoint" "rag_endpoint" {
   display_name = "rag-index-endpoint"
   region       = var.region
-  depends_on = [ google_vertex_ai_index.rag_index ]
 }
 
 resource "google_vertex_ai_index_endpoint_deployed_index" "rag_deployed" {
   deployed_index_id = "rag_index_01"
-  index_endpoint = google_vertex_ai_index_endpoint.rag_endpoint.id
-  index          = google_vertex_ai_index.rag_index.id
+  index_endpoint    = google_vertex_ai_index_endpoint.rag_endpoint.id
+  index             = google_vertex_ai_index.rag_index.id
+
   dedicated_resources {
-  machine_spec {
-    machine_type = "e2-standard-2"
+    machine_spec {
+      machine_type = "e2-standard-2"
+    }
+    min_replica_count = 1
+    max_replica_count = 1
   }
-  min_replica_count = 1
-  max_replica_count = 1
- }
+
+  depends_on = [
+    google_vertex_ai_index.rag_index,
+    google_vertex_ai_index_endpoint.rag_endpoint
+  ]
 }
+
 #      sed -i 's|CHUNK_URL_PLACEHOLDER|${module.chunk_cloud_run.cloud_run_endpoint}|g' ./helm/user-backend/values.yaml
 /* 
 resource "null_resource" "update_user_backend_values" {
@@ -169,6 +177,21 @@ resource "null_resource" "helm_deploy_admin_backend" {
 #     null_resource.update_admin_backend_values
 #   ]
 # }
+
+resource "null_resource" "push_image" {
+  provisioner "local-exec" {
+    command = <<EOT
+      gcloud auth configure-docker ${var.region}-docker.pkg.dev -q
+
+      docker build -t ${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images_repo.repository_id}/chunk-image:v1 ../Chunk_Function/
+      docker push ${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images_repo.repository_id}/chunk-image:v1
+    EOT
+    interpreter = ["bash", "-c"]
+  }
+
+  depends_on = [google_artifact_registry_repository.images_repo]
+}
+
 data "google_project" "project" {
   project_id = var.project_id
 }
@@ -177,6 +200,7 @@ resource "google_storage_bucket" "cloudbuild_logs" {
   name                        = "${var.project_id}-build-logs"
   location                    = "US"
   uniform_bucket_level_access = true
+  force_destroy               = true 
 
   versioning { enabled = false }
 

@@ -194,3 +194,90 @@ async def pubsub_endpoint(req: PubSubMessage):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
+# add these imports at top of main.py
+import uuid
+from fastapi import BackgroundTasks
+
+# add near top-level after app = FastAPI(...)
+job_store = {}  # simple in-memory job store: job_id -> {"status": "pending|running|done|failed", "details": {...}}
+
+# Helper to update job status
+def job_update(job_id: str, status: str, details: dict | None = None):
+    job_store[job_id] = {"status": status, "details": details or {}}
+
+# Background worker that processes a local file path
+def process_file_job(job_id: str, local_path: str):
+    """Runs the pipeline for a file already saved on disk and updates job_store."""
+    job_update(job_id, "running")
+    errors = []
+    try:
+        # 1) Chunk
+        try:
+            chunks = call_chunk_service(local_path)
+            if not chunks:
+                raise RuntimeError("Chunk service returned empty")
+        except Exception as e:
+            errors.append({"stage": "chunk", "error": str(e)})
+            raise
+
+        # 2) Embeddings
+        try:
+            embeddings = get_embeddings(chunks)
+            if not embeddings:
+                raise RuntimeError("No embeddings returned")
+        except Exception as e:
+            errors.append({"stage": "embedding", "error": str(e)})
+            raise
+
+        # 3) Store embeddings
+        try:
+            store_resp = store_embeddings(embeddings)
+        except Exception as e:
+            errors.append({"stage": "store_embeddings", "error": str(e)})
+            raise
+
+        # success
+        job_update(job_id, "done", {"acknowledged": True, "errors": errors, "stored": len(embeddings), "store_resp": store_resp})
+    except Exception as exc:
+        # record failure
+        job_update(job_id, "failed", {"errors": errors, "exception": str(exc)})
+
+# New endpoint: accept plain text, create temp file and start background job
+@app.post("/submit_text")
+async def submit_text(payload: dict, background_tasks: BackgroundTasks):
+    """
+    Accepts JSON: { "text": "...", "filename": "optional_name.txt" }
+    Returns: { "job_id": "<uuid>", "status": "accepted" }
+    """
+    text = payload.get("text", "")
+    filename = payload.get("filename", f"doc_{str(uuid.uuid4())[:8]}.txt")
+    if not text:
+        raise HTTPException(status_code=400, detail="No text provided")
+
+    job_id = str(uuid.uuid4())
+    local_path = f"/tmp/{job_id}_{filename.replace('/', '_')}"
+    try:
+        with open(local_path, "wb") as f:
+            # write bytes so pipeline can open as file
+            f.write(text.encode("utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save text: {e}")
+
+    # initialize job store and start background task
+    job_update(job_id, "accepted", {"local_path": local_path})
+    background_tasks.add_task(process_file_job, job_id, local_path)
+
+    return {"job_id": job_id, "status": "accepted"}
+
+# New endpoint: check job status
+@app.get("/status/{job_id}")
+async def job_status(job_id: str):
+    """
+    Returns job state and any details.
+    Example: { "job_id": "...", "status": "done", "details": {...} }
+    """
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, "status": job["status"], "details": job["details"]}
