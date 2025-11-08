@@ -94,47 +94,45 @@ steps:
   id: 'push-user-frontend-latest'
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:latest']
 
-name: 'hashicorp/terraform:1.6.0'
-id: 'terraform-deploy'
-entrypoint: 'sh'
-args:
-  - -c
-  - |
-      # Install bash and verify installation
-      echo "Installing bash"
+- name: 'hashicorp/terraform:1.6.0'
+  id: 'terraform-deploy'
+  entrypoint: 'sh'
+  args:
+    - -c
+    - |
+        # Install bash and verify installation
+        echo "Installing bash"
 
-      # Print environment variables
-      echo "Environment variables:"
-      echo "PROJECT_ID=${_PROJECT_ID}"
-      echo "REGION=${_REGION}"
-      echo "ARTIFACT_REG_HOST=${_ARTIFACT_REG_HOST}"
-      echo "REPO=${_REPO}"
-      echo "SHORT_SHA=${SHORT_SHA}"
+        # Print environment variables
+        echo "Environment variables:"
+        echo "PROJECT_ID=${_PROJECT_ID}"
+        echo "REGION=${_REGION}"
+        echo "ARTIFACT_REG_HOST=${_ARTIFACT_REG_HOST}"
+        echo "REPO=${_REPO}"
+        echo "SHORT_SHA=${SHORT_SHA}"
 
-      # Print current directory and list files
-      echo "Current directory:"
-      pwd
-      ls -la
+        # Print current directory and list files
+        echo "Current directory:"
+        pwd
+        ls -la
 
-      # Navigate to Terraform directory
-      echo "Navigating to Terraform directory"
-      cd ./Terraform/terraform-infra || { echo "Failed to cd to terraform-infra"; exit 1; }
+        # Navigate to Terraform directory
+        echo "Navigating to Terraform directory"
+        cd ./Terraform/terraform-infra || { echo "Failed to cd to terraform-infra"; exit 1; }
 
-      # Run Terraform commands with debugging enabled
-      echo "Running terraform init"
-      terraform init -no-color || { echo "Terraform init failed"; exit 1; }
+        # Run Terraform commands with debugging enabled
+        echo "Running terraform init"
+        terraform init -no-color || { echo "Terraform init failed"; exit 1; }
 
-      echo "Running terraform apply"
-      terraform apply -auto-approve -no-color \
-        -var="project_id=${_PROJECT_ID}" \
-        -var="region=${_REGION}" \
-        -var="artifact_registry_host=${_ARTIFACT_REG_HOST}" \
-        -var="repo=${_REPO}" \
-        -var="chunk_image_tag=$SHORT_SHA" || { echo "Terraform apply failed"; exit 1; }
+        echo "Running terraform apply"
+        terraform apply -auto-approve -no-color \
+          -var="project_id=${_PROJECT_ID}" \
+          -var="region=${_REGION}" \
+          -var="artifact_registry_host=${_ARTIFACT_REG_HOST}" \
+          -var="repo=${_REPO}" \
+          -var="chunk_image_tag=$SHORT_SHA" || { echo "Terraform apply failed"; exit 1; }
 
-      echo "Terraform apply completed successfully"
-
-        
+        echo "Terraform apply completed successfully"
 # # optionally notify GitLab and pass $SHORT_SHA
 # - name: 'curlimages/curl'
 #   id: 'trigger-gitlab'
