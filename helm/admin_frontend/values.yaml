@@ -23,15 +23,25 @@ env:
   VITE_API_URL: "/api"
   ADMIN_CLOUD_RUN_URL: "/api"
 
-ingress:
+# ingress:
+#   enabled: false
+#   className: ""
+#   annotations: {}
+#   hosts:
+#     - host: frontend.example.com
+#       paths:
+#         - /
+#   tls: []
+
+route:
   enabled: false
-  className: ""
+  host: "frontend.apps.example.osd.com"  # change to your OpenShift domain
   annotations: {}
-  hosts:
-    - host: frontend.example.com
-      paths:
-        - /
-  tls: []
+  tls:
+    enabled: false
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
 
 hpa:
   enabled: false
@@ -42,3 +52,4 @@ hpa:
 nodeSelector: {}
 
 tolerations: []
+

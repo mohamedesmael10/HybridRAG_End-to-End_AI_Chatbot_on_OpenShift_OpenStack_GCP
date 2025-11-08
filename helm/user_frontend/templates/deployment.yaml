@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "admin-backend.fullname" . }}
+  name: {{ .Release.Name }}-frontend
   labels:
-    app: {{ include "admin-backend.name" . }}
+    app: {{ .Release.Name }}-frontend
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: {{ include "admin-backend.name" . }}
+      app: {{ .Release.Name }}-frontend
   template:
     metadata:
       labels:
-        app: {{ include "admin-backend.name" . }}
+        app: {{ .Release.Name }}-frontend
     spec:
       containers:
-        - name: admin-backend
+        - name: frontend
           image:
             repository: "{{ .Values.image.repository | default "nginx" }}"
             tag: "{{ .Values.image.tag | default "latest" }}"
@@ -23,22 +23,11 @@ spec:
           ports:
             - containerPort: {{ .Values.service.targetPort }}
           env:
-            - name: EMBEDDING_ENDPOINT
-              value: "{{ .Values.env.EMBEDDING_ENDPOINT }}"
-            - name: METADATA_DB_URL
-              value: "{{ .Values.env.METADATA_DB_URL }}"
-            - name: CHUNK_URL
-              value: "{{ .Values.env.CHUNK_URL }}"
-            - name: VECTOR_DB_ENDPOINT
-              value: "{{ .Values.env.VECTOR_DB_ENDPOINT }}"
-            - name: DEPLOYED_INDEX_ID
-              value: "{{ .Values.env.DEPLOYED_INDEX_ID }}"
-            - name: PROJECT_ID
-              value: "{{ .Values.env.PROJECT_ID }}"
-            - name: REGION
-              value: "{{ .Values.env.REGION }}"
-            - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: "/app/keys/{{ .Values.gcpServiceAccountKeyFile }}" 
+            - name: ADMIN_CLOUD_RUN_URL
+              value: "{{ .Values.env.ADMIN_CLOUD_RUN_URL }}"
+            # If you want the built app to use a runtime env var (not recommended for Vite-built static bundle), expose it here:
+            - name: VITE_API_URL
+              value: "{{ .Values.env.VITE_API_URL }}"
           readinessProbe:
             httpGet:
               path: /health
@@ -60,11 +49,3 @@ spec:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
               memory: {{ .Values.resources.requests.memory }}
-          volumeMounts:  
-            - name: gcp-sa
-              mountPath: /app/keys
-              readOnly: true  
-      volumes:
-        - name: gcp-sa
-          secret:
-            secretName: {{ .Values.gcpServiceAccountSecretName }}

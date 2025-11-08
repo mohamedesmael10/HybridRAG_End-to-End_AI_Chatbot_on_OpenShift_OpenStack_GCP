@@ -141,7 +141,7 @@ export default function App(){
           <button type="submit" disabled={loading || !API_BASE}>{loading ? '...' : 'Send'}</button>
         </form>
 
-        <div className="chat-list">
+        <div className="chat-list" id="chat-list">
           {history.length===0 && <div className="empty">No messages yet — ask something.</div>}
           {history.map(entry => (
             <div className="chat-entry" key={entry.id}>
@@ -159,8 +159,35 @@ export default function App(){
       <style>{`
         :root{ --bg:#0f1720; --card:#0b1220; --muted:#9aa4b2; --accent:#4f46e5; }
         *{box-sizing:border-box}
-        body,html,#root{height:100%;margin:0;font-family:Inter,system-ui,Arial}
-        .page{display:flex;flex-direction:column;height:100vh;background:linear-gradient(180deg,#071026, #071936);color:#e6eef8;padding:16px}
+        /* Use min-height rather than forcing 100% height so background covers whole page */
+        body,html,#root{min-height:100%;margin:0;font-family:Inter,system-ui,Arial}
+
+        /* make .page the stacking context and use a fixed pseudo-element for the gradient */
+        .page{
+          position: relative;
+          display:flex;
+          flex-direction:column;
+          min-height:100vh;
+          color:#e6eef8;
+          padding:16px;
+          /* ensure content is above the background pseudo-element */
+          z-index: 0;
+        }
+
+        /* gradient painted once, fixed behind the content (works well on mobile too) */
+        .page::before{
+          content: "";
+          position: fixed;
+          inset: 0;
+          z-index: -1;
+          pointer-events: none;
+          /* gradient used previously */
+          background: linear-gradient(180deg,#071026, #071936);
+          /* optional: improve rendering */
+          background-repeat: no-repeat;
+          background-attachment: fixed;
+        }
+
         header{display:flex;align-items:center;justify-content:space-between}
         h1{margin:0;font-size:20px}
         .meta{display:flex;gap:12px;align-items:center}
@@ -168,7 +195,15 @@ export default function App(){
         .ask-form{display:flex;gap:8px}
         .ask-form input{flex:1;padding:10px;border-radius:8px;border:1px solid #123; background:#071126;color:inherit}
         .ask-form button{padding:10px 14px;border-radius:8px;border:0;background:var(--accent);color:white}
-        .chat-list{overflow:auto;padding:8px;display:flex;flex-direction:column-reverse;gap:12px}
+        /* chat-list should be scrollable and smooth on mobile */
+        .chat-list{
+          overflow:auto;
+          padding:8px;
+          display:flex;
+          flex-direction:column-reverse;
+          gap:12px;
+          -webkit-overflow-scrolling: touch;
+        }
         .bubble{max-width:80%;padding:10px;border-radius:12px}
         .bubble.user{align-self:flex-end;background:#0b3b3b}
         .bubble.bot{align-self:flex-start;background:#0b2a44}

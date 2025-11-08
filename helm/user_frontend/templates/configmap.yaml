@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "user-frontend.fullname" . }}-config
+data:
+  # Provide a simple runtime config the app could read if you add code to fetch it.
+  app-config.json: |
+    {
+      "VITE_API_URL": "{{ .Values.env.VITE_API_URL }}",
+      "ADMIN_CLOUD_RUN_URL": "{{ .Values.env.ADMIN_CLOUD_RUN_URL }}"
+    }

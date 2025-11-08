@@ -2,28 +2,30 @@
 # apiVersion: networking.k8s.io/v1
 # kind: Ingress
 # metadata:
-#   name: {{ include "user-backend.fullname" . }}
+#   name: {{ .Release.Name }}-frontend
 #   annotations: {{ toYaml .Values.ingress.annotations | nindent 4 }}
 # spec:
-#   ingressClassName: {{ .Values.ingress.className | default "" }}
+#   {{- if .Values.ingress.className }}
+#   ingressClassName: {{ .Values.ingress.className }}
+#   {{- end }}
 #   rules:
-#   {{- range .Values.ingress.hosts }}
+#     {{- range .Values.ingress.hosts }}
 #     - host: {{ .host }}
 #       http:
 #         paths:
-#         {{- range .paths }}
+#           {{- range .paths }}
 #           - path: {{ . }}
 #             pathType: Prefix
 #             backend:
 #               service:
-#                 name: {{ include "user-backend.fullname" $ }}
+#                 name: {{ $.Release.Name }}-frontend
 #                 port:
 #                   number: {{ $.Values.service.port }}
-#         {{- end }}
-#   {{- end }}
+#           {{- end }}
+#     {{- end }}
 #   {{- if .Values.ingress.tls }}
 #   tls:
-#   {{- toYaml .Values.ingress.tls | nindent 4 }}
+#   {{ toYaml .Values.ingress.tls | nindent 2 }}
 #   {{- end }}
 # {{- end }}
 
@@ -31,22 +33,19 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: {{ include "user-backend.fullname" . }}
+  name: {{ .Release.Name }}-osd
   annotations: {{ toYaml .Values.route.annotations | nindent 4 }}
 spec:
   to:
     kind: Service
-    name: {{ include "user-backend.fullname" . }}
+    name: {{ .Release.Name }}-osd
     weight: 100
   port:
     targetPort: {{ .Values.service.targetPort }}
-  tls:
   {{- if .Values.route.tls.enabled }}
+  tls:
     termination: {{ .Values.route.tls.termination | default "edge" }}
     insecureEdgeTerminationPolicy: {{ .Values.route.tls.insecureEdgeTerminationPolicy | default "Redirect" }}
-  {{- else }}
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
   {{- end }}
   host: {{ .Values.route.host | default "" }}
 {{- end }}

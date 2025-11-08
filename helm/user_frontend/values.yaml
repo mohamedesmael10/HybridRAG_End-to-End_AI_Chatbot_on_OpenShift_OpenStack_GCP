@@ -1,0 +1,58 @@
+replicaCount: 2
+
+image:
+  repository: ""        # set via --set or CI (e.g. your-registry/esmael-ai-frontend)
+  tag: ""               # set via --set or CI
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+resources:
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+
+# runtime environment variables (the Docker image entrypoint will replace the placeholder in index.html when ADMIN_CLOUD_RUN_URL is supplied)
+env:
+  VITE_API_URL: "/api"        # build-time value (can be passed to build in CD pipeline)
+  ADMIN_CLOUD_RUN_URL: ""     # runtime: used to patch index.html inside container (optional)
+
+# ingress configuration
+# ingress:
+#   enabled: false
+#   className: ""
+#   annotations: {}
+#   hosts:
+#     - host: frontend.example.com
+#       paths:
+#         - /
+#   tls: []
+
+route:
+  enabled: false
+  host: "frontend.apps.example.osd.com"  # change to your OpenShift domain
+  annotations: {}
+  tls:
+    enabled: false
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+
+# liveness/readiness
+probe:
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3

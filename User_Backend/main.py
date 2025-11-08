@@ -106,6 +106,27 @@ def retry_on_exception(max_retries=3, backoff_base=0.2):
     return decorator
 
 # ---------- Startup / init ----------
+import time
+
+redis_client = None
+
+def try_init_redis(retries=10, wait=2.0):
+    global redis_client
+    last_exc = None
+    for i in range(retries):
+        try:
+            redis_client = create_redis_client()
+            redis_client.ping()
+            logger.info("Connected to Redis at %s:%s db=%s", REDIS_HOST, REDIS_PORT, REDIS_DB)
+            return True
+        except Exception as e:
+            last_exc = e
+            logger.warning("Redis init attempt %s/%s failed: %s - retrying in %.1fs", i+1, retries, e, wait)
+            time.sleep(wait)
+    logger.warning("Redis init failed after %s attempts: %s", retries, last_exc)
+    redis_client = None
+    return False
+
 
 def create_redis_client():
     if not REDIS_HOST:
@@ -155,12 +176,10 @@ def startup_event():
     logger.info("Startup: validating configuration")
     init_google_auth()
     try:
-        redis_client = create_redis_client()
-        redis_client.ping()
-        logger.info("Connected to Redis at %s:%s db=%s", REDIS_HOST, REDIS_PORT, REDIS_DB)
+        try_init_redis(retries=10, wait=2.0)
     except Exception as e:
+        logger.warning("Redis init failed (will surface on /health and ops): %s", e)
         redis_client = None
-        logger.warning("Redis init failed at startup: %s", e)
 
 # ---------- Redis wrappers (retry kept) ----------
 @retry_on_exception(MAX_RETRIES, BACKOFF_BASE)

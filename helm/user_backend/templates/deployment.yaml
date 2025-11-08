@@ -2,8 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "user-backend.fullname" . }}
-  labels:
-    app: {{ include "user-backend.name" . }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -16,7 +14,9 @@ spec:
     spec:
       containers:
         - name: user-backend
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image:
+            repository: "{{ .Values.image.repository | default "nginx" }}"
+            tag: "{{ .Values.image.tag | default "latest" }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.service.targetPort }}
@@ -27,12 +27,19 @@ spec:
               value: "{{ .Values.env.CHUNK_URL }}"
             - name: VECTOR_DB_ENDPOINT
               value: "{{ .Values.env.VECTOR_DB_ENDPOINT }}"
+            - name: VECTOR_DB_ENDPOINT_UPSERT
+              value: "{{ .Values.env.VECTOR_DB_ENDPOINT_UPSERT | default "" }}"
             - name: DEPLOYED_INDEX_ID
               value: "{{ .Values.env.DEPLOYED_INDEX_ID }}"
             - name: MEMORY_STORE_HOST
               value: "{{ .Values.env.MEMORY_STORE_HOST }}"
             - name: MEMORY_STORE_PORT
               value: "{{ .Values.env.MEMORY_STORE_PORT }}"
+            - name: MEMORY_STORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gcpServiceAccountSecretName }}
+                  key: MEMORY_STORE_PASSWORD
             - name: PROJECT_ID
               value: "{{ .Values.env.PROJECT_ID }}"
             - name: REGION
@@ -45,30 +52,26 @@ spec:
               value: "{{ .Values.env.LLM_TEMPERATURE }}"
             - name: LLM_MAX_OUTPUT_TOKENS
               value: "{{ .Values.env.LLM_MAX_OUTPUT_TOKENS }}"
-            - name: VECTOR_NEIGHBOR_COUNT
-              value: "{{ .Values.env.VECTOR_NEIGHBOR_COUNT }}"
-          # if you store password in Kubernetes secret, mount as env
-          {{- if .Values.env.MEMORY_STORE_PASSWORD_SECRET }}
-            - name: MEMORY_STORE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.env.MEMORY_STORE_PASSWORD_SECRET }}
-                  key: MEMORY_STORE_PASSWORD
-          {{- end }}
+             - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/app/keys/{{ .Values.gcpServiceAccountKeyFile }}"
+          volumeMounts:
+            - name: gcp-sa
+              mountPath: /app/keys
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /health
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds }}
-            periodSeconds: {{ .Values.probe.periodSeconds }}
-            timeoutSeconds: {{ .Values.probe.timeoutSeconds }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /health
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds }}
-            periodSeconds: {{ .Values.probe.periodSeconds }}
-            timeoutSeconds: {{ .Values.probe.timeoutSeconds }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
           resources:
             limits:
               cpu: {{ .Values.resources.limits.cpu }}
@@ -76,3 +79,7 @@ spec:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
               memory: {{ .Values.resources.requests.memory }}
+      volumes:
+        - name: gcp-sa
+          secret:
+            secretName: {{ .Values.gcpServiceAccountSecretName }}

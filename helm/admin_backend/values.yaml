@@ -36,16 +36,25 @@ probe:
   periodSeconds: 15
   timeoutSeconds: 5
 
-# Optional ingress
-ingress:
+# # Optional ingress
+# ingress:
+#   enabled: false
+#   className: ""
+#   annotations: {}
+#   hosts:
+#     - host: pubsub-backend.example.com
+#       paths:
+#         - /
+#   tls: []
+
+route:
   enabled: false
-  className: ""
+  host: "admin-backend.apps.example.osd.com"  # Replace with your real OpenShift domain
   annotations: {}
-  hosts:
-    - host: pubsub-backend.example.com
-      paths:
-        - /
-  tls: []
+  tls:
+    enabled: false
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
 
 
 # horizontal pod autoscaler (optional)
@@ -54,3 +63,6 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 5
   targetCPUUtilizationPercentage: 70
+
+gcpServiceAccountSecretName: "gcp-sa-key"
+gcpServiceAccountKeyFile: "service-account.json"

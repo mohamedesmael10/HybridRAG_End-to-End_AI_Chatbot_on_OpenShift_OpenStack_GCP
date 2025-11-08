@@ -1,0 +1,101 @@
+# output "cdn_bucket_sa_email" {
+#   value = module.cdn_bucket_sa.service_account_email
+# }
+
+# output "user_cloud_run_sa_email" {
+#   value = module.user_cloud_run_sa.service_account_email
+# }
+
+# output "admin_bucket_sa_email" {
+#   value = module.admin_bucket_sa.service_account_email
+# }
+
+# output "admin_cloud_run_sa_email" {
+#   value = module.admin_cloud_run_sa.service_account_email
+# }
+
+# output "chunk_cloud_run_endpoint" {
+#   value = module.chunk_cloud_run.cloud_run_endpoint
+# }
+
+# output "user_url" {
+#   value = module.user_cloud_run.cloud_run_endpoint
+# }
+
+# output "admin_url" {
+#   value = module.admin_cloud_run.cloud_run_endpoint
+# }
+
+# output "user_frontend_url" {
+#   value = module.user_frontend_cloud_run.cloud_run_endpoint
+# }
+
+# output "admin_frontend_url" {
+#   value = module.admin_frontend_cloud_run.cloud_run_endpoint
+# }
+
+# output "index_endpoint_url" {
+#   description = "The URL of the Vertex AI Endpoint for embeddings."
+#   value       = google_vertex_ai_index_endpoint.rag_endpoint.id
+# }
+
+# output "redis_host" {
+#   value = google_redis_instance.user_memory_store.host
+# }
+
+# output "redis_port" {
+#   value = google_redis_instance.user_memory_store.port
+# }
+
+# output "index_endpoint" {
+#   value = google_vertex_ai_index_endpoint.rag_endpoint.name
+# }
+# ---- corrected outputs ----
+
+# output "embedding_endpoint" {
+#   description = "Embedding API endpoint (Text embeddings predict)"
+#   value       = "https://${var.region}-aiplatform.googleapis.com/v1/projects/${var.project_id}/locations/${var.region}/publishers/google/models/text-embedding-004:predict"
+# }
+
+# output "chunk_url" {
+#   description = "URL of the chunk processing service (Cloud Run module output)"
+#   # use the module output (module must expose cloud_run_endpoint)
+#   value       = try(module.chunk_cloud_run.cloud_run_endpoint, "")
+# }
+
+# output "vector_db_endpoint_find_neighbors" {
+#   description = "Vertex AI MatchingEngine findNeighbors endpoint (public domain)"
+#   value       = "https://${google_vertex_ai_index_endpoint.rag_endpoint.public_endpoint_domain_name}/v1/projects/${var.project_id}/locations/${var.region}/indexEndpoints/${google_vertex_ai_index_endpoint.rag_endpoint.name}:findNeighbors"
+# }
+
+# output "vector_db_endpoint_upsert" {
+#   description = "Vertex AI MatchingEngine upsertDatapoints endpoint"
+#   value       = "https://${google_vertex_ai_index_endpoint.rag_endpoint.public_endpoint_domain_name}/v1/projects/${var.project_id}/locations/${var.region}/indexEndpoints/${google_vertex_ai_index_endpoint.rag_endpoint.name}:upsertDatapoints"
+# }
+
+# output "deployed_index_id" {
+#   description = "Deployed index ID"
+#   value       = google_vertex_ai_index_endpoint_deployed_index.rag_deployed.deployed_index_id
+# }
+
+output "project_id" {
+  description = "Project ID"
+  value       = var.project_id
+}
+
+output "region" {
+  description = "Region"
+  value       = var.region
+}
+
+output "artifact_repo_id" {
+  value = google_artifact_registry_repository.images_repo.repository_id
+}
+
+output "cloudbuild_trigger_id" {
+  value = google_cloudbuild_trigger.build_all_images.id
+}
+
+output "logs_bucket" {
+  value = google_storage_bucket.cloudbuild_logs.name
+}

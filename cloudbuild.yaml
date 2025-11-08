@@ -1,47 +1,117 @@
-logsBucket: gs://${_PROJECT_ID}-build-logs    
+# cloudbuild.yaml
+substitutions:
+  _ARTIFACT_REG_HOST: "${_ARTIFACT_REG_HOST}"
+  _REPO: "${_REPO}"
+  _PROJECT_ID: "${_PROJECT_ID}"
+  _REGION: "${_REGION}"
+
+logsBucket: gs://${_PROJECT_ID}-build-logs
+
 
 steps:
-# Build & push admin backend
+# Build & push admin backend (tagged with SHORT_SHA and latest)
 - name: 'gcr.io/cloud-builders/docker'
   id: 'build-admin-backend'
-  args: ['build', '-t', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA', './Admin_Backend']
+  args:
+    - 'build'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:latest'
+    - './Admin_Backend'
 - name: 'gcr.io/cloud-builders/docker'
-  id: 'push-admin-backend'
+  id: 'push-admin-backend-sha'
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-admin-backend-latest'
+  args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:latest']
 
-# Build & push user backend (use singular 'user-backend')
+# Build & push user backend
 - name: 'gcr.io/cloud-builders/docker'
   id: 'build-user-backend'
-  args: ['build', '-t', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:$SHORT_SHA', './Users_Backend']
+  args:
+    - 'build'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:$SHORT_SHA'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:latest'
+    - './Users_Backend'
 - name: 'gcr.io/cloud-builders/docker'
-  id: 'push-user-backend'
+  id: 'push-user-backend-sha'
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:$SHORT_SHA']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-user-backend-latest'
+  args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:latest']
 
 # Build & push chunk image
 - name: 'gcr.io/cloud-builders/docker'
   id: 'build-chunk'
-  args: ['build', '-t', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/chunk-image:$SHORT_SHA', './Chunk_Function']
+  args:
+    - 'build'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/chunk-image:$SHORT_SHA'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/chunk-image:latest'
+    - './Chunk_Function'
 - name: 'gcr.io/cloud-builders/docker'
-  id: 'push-chunk'
+  id: 'push-chunk-sha'
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/chunk-image:$SHORT_SHA']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-chunk-latest'
+  args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/chunk-image:latest']
 
 # Build & push admin frontend
 - name: 'gcr.io/cloud-builders/docker'
   id: 'build-admin-frontend'
-  args: ['build', '-t', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA', './Admin_Frontend']
+  args:
+    - 'build'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:latest'
+    - './Admin_Frontend'
 - name: 'gcr.io/cloud-builders/docker'
-  id: 'push-admin-frontend'
+  id: 'push-admin-frontend-sha'
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-admin-frontend-latest'
+  args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:latest']
 
 # Build & push user frontend
 - name: 'gcr.io/cloud-builders/docker'
   id: 'build-user-frontend'
-  args: ['build', '-t', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA', './User_Frontend']
+  args:
+    - 'build'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA'
+    - '-t'
+    - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:latest'
+    - './User_Frontend'
 - name: 'gcr.io/cloud-builders/docker'
-  id: 'push-user-frontend'
+  id: 'push-user-frontend-sha'
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA']
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'push-user-frontend-latest'
+  args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:latest']
 
-# # Trigger GitLab CI/CD (CD) via Pipeline Trigger
+- name: 'hashicorp/terraform:1.6.0'
+  id: 'terraform-deploy'
+  entrypoint: 'bash'
+  args:
+    - -c
+    - |
+      set -euo pipefail
+      echo "Running terraform infra apply with chunk image tag = $SHORT_SHA"
+      cd terraform-infra
+      terraform init -no-color
+      terraform apply -auto-approve -no-color \
+        -var="project_id=${_PROJECT_ID}" \
+        -var="region=${_REGION}" \
+        -var="artifact_registry_host=${_ARTIFACT_REG_HOST}" \
+        -var="repo=${_REPO}" \
+        -var="chunk_image_tag=$SHORT_SHA"
+        
+# # optionally notify GitLab and pass $SHORT_SHA
 # - name: 'curlimages/curl'
 #   id: 'trigger-gitlab'
 #   entrypoint: 'sh'
@@ -49,9 +119,9 @@ steps:
 #   args:
 #     - '-c'
 #     - |
-#       echo "Triggering GitLab pipeline..."
+#       echo "Triggering GitLab pipeline with IMAGE_TAG=$SHORT_SHA..."
 #       API="https://gitlab.com/api/v4/projects/${_GITLAB_PROJ_ID}/trigger/pipeline"
-#       curl -X POST \
+#       curl -s -X POST \
 #         -F token="$GITLAB_TRIGGER_TOKEN" \
 #         -F ref="${_GITLAB_REF}" \
 #         -F "variables[IMAGE_TAG]=$SHORT_SHA" \
@@ -59,14 +129,16 @@ steps:
 #         -F "variables[REPO]=${_REPO}" \
 #         $API
 
+# # images (optional listing)
 # images:
-# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA"
-# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:$SHORT_SHA"
-# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/chunk-image:$SHORT_SHA"
-# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA"
-# - "${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA"
+# - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA'
+# - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:$SHORT_SHA'
+# - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/chunk-image:$SHORT_SHA'
+# - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-frontend:$SHORT_SHA'
+# - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:$SHORT_SHA'
 
+# # If you use secret manager for GitLab token:
 # availableSecrets:
 #   secretManager:
-#   - versionName: "projects/YOUR_GCP_PROJECT/secrets/gitlab-trigger-token/versions/latest"
-#     env: "GITLAB_TRIGGER_TOKEN"
+#   - versionName: 'projects/${_PROJECT_ID}/secrets/GITLAB/versions/latest'
+#     env: 'GITLAB_TRIGGER_TOKEN'
