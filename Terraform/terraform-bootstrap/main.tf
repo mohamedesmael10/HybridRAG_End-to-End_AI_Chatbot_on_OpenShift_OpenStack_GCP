@@ -96,7 +96,8 @@ echo "==> Triggering Cloud Build trigger id: ${google_cloudbuild_trigger.build_a
 gcloud builds triggers run ${google_cloudbuild_trigger.build_all_images.trigger_id} \
   --branch="${var.pipeline_branch}" \
   --region="${var.cloudbuild_region}" \
-  --project="${var.project_id}"
+  --project="${var.project_id}" \
+  --substitutions=_REGION="${var.cloudbuild_region}"
 echo "==> Cloud Build trigger requested."
 EOT
     interpreter = ["bash", "-c"]

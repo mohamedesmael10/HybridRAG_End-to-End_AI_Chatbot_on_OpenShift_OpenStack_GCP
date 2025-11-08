@@ -35,7 +35,7 @@ steps:
     - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:$SHORT_SHA'
     - '-t'
     - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:latest'
-    - './Users_Backend'
+    - './User_Backend'
 - name: 'gcr.io/cloud-builders/docker'
   id: 'push-user-backend-sha'
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-backend:$SHORT_SHA']
