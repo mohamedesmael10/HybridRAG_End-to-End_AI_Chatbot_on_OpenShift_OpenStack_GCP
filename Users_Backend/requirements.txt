@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-requests
-redis
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
