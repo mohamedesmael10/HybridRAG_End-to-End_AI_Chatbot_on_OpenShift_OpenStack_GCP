@@ -7,7 +7,7 @@ variable "project_id" {
 variable "region" {
   type        = string
   description = "The GCP region (e.g. us-central1)"
-  default     = "us-east1"
+  default     = "us-central1"
 }
 
 
@@ -43,4 +43,20 @@ variable "vault_address" {
   type        = string
   description = "Vault address (e.g. http://127.0.0.1:8200 or https://vault.example.com)"
   default     = "http://127.0.0.1:8200"
+}
+
+variable "infra_dir" {
+  type    = string
+  default = "../terraform-infra" 
+  description = "Relative path to the terraform-infra directory that will be destroyed on bootstrap destroy."
+}
+
+variable "pipeline_branch" {
+  type    = string
+  default = "main"
+}
+
+variable "cloudbuild_region" {
+  type    = string
+  default = "us-central1"
 }

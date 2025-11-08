@@ -87,3 +87,48 @@ resource "google_cloudbuild_trigger" "build_all_images" {
     google_storage_bucket.cloudbuild_logs
   ]
 }
+
+resource "null_resource" "run_cloudbuild_trigger_after_apply" {
+  provisioner "local-exec" {
+    command = <<EOT
+set -e
+echo "==> Triggering Cloud Build trigger id: ${google_cloudbuild_trigger.build_all_images.trigger_id}"
+gcloud builds triggers run ${google_cloudbuild_trigger.build_all_images.trigger_id} \
+  --branch="${var.pipeline_branch}" \
+  --region="${var.cloudbuild_region}" \
+  --project="${var.project_id}"
+echo "==> Cloud Build trigger requested."
+EOT
+    interpreter = ["bash", "-c"]
+  }
+
+  depends_on = [
+    google_cloudbuild_trigger.build_all_images,
+    google_artifact_registry_repository.images_repo,
+    google_storage_bucket.cloudbuild_logs
+  ]
+}
+
+resource "null_resource" "destroy_infra_when_bootstrap_destroyed" {
+  triggers = {
+    infra_dir = var.infra_dir
+  }
+
+  provisioner "local-exec" {
+    when = destroy
+    command = <<EOT
+set -e
+echo "==> bootstrap destroy detected — running 'terraform destroy' in ${self.triggers.infra_dir}"
+cd ${self.triggers.infra_dir} || (echo "Infra dir ${self.triggers.infra_dir} not found" && exit 1)
+terraform init -input=false
+terraform destroy -auto-approve
+echo "==> terraform-infra destroy finished."
+EOT
+    interpreter = ["bash", "-c"]
+  }
+
+  depends_on = [
+    google_cloudbuild_trigger.build_all_images,
+    google_storage_bucket.cloudbuild_logs
+  ]
+}
