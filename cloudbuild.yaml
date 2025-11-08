@@ -100,9 +100,11 @@ steps:
   args:
     - -c
     - |
+      apk add --no-cache bash
       set -euo pipefail
       echo "Running terraform infra apply with chunk image tag = $SHORT_SHA"
-      cd terraform-infra
+      ls -la
+      cd ./Terraform/terraform-infra
       terraform init -no-color
       terraform apply -auto-approve -no-color \
         -var="project_id=${_PROJECT_ID}" \
