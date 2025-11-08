@@ -96,7 +96,7 @@ steps:
 
 - name: 'hashicorp/terraform:1.6.0'
   id: 'terraform-deploy'
-  entrypoint: 'bash'
+  entrypoint: 'sh'
   args:
     - -c
     - |
