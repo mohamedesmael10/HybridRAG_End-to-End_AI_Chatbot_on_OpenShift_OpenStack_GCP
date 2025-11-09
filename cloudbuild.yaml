@@ -94,7 +94,7 @@ steps:
   id: 'push-user-frontend-latest'
   args: ['push', '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/user-frontend:latest']
 
-- name: 'hashicorp/terraform:1.6.7'
+- name: 'hashicorp/terraform:1.6.0'
   id: 'terraform-deploy'
   entrypoint: 'sh'
   args:
