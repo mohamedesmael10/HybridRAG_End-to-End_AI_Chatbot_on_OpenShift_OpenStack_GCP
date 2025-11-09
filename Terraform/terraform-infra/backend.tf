@@ -9,7 +9,7 @@ terraform {
   backend "gcs" {
     bucket      = "terrraform-rag-app-state"
     prefix      = "dev"
-    credentials = "/home/esmael/Downloads/rock-task-468906-n1-7263e54c7ecd.json"  
+  #  credentials = "/home/esmael/Downloads/rock-task-468906-n1-7263e54c7ecd.json"  
   }
   
 }
