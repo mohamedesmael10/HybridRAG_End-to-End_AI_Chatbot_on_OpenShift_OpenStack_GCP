@@ -127,7 +127,7 @@ steps:
         }
 
         echo "=== 📋 Terraform Plan ==="
-        terraform plan -input=false -no-color \
+        terraform plan -input=false -no-color -lock=false \
           -var="project_id=${_PROJECT_ID}" \
           -var="region=${_REGION}" \
           -var="artifact_registry_host=${_ARTIFACT_REG_HOST}" \
