@@ -113,6 +113,7 @@ steps:
         # Ensure Terraform directory exists
         cd Terraform/terraform-infra || { echo "❌ Terraform directory not found!"; exit 1; }
         ls -la
+
         echo "=== 🧠 Terraform Version ==="
         terraform version || { echo "❌ Terraform not found!"; exit 1; }
 
@@ -144,7 +145,7 @@ steps:
 
         echo "✅ Terraform apply completed successfully!"
 
-        
+
 # # optionally notify GitLab and pass $SHORT_SHA
 # - name: 'curlimages/curl'
 #   id: 'trigger-gitlab'

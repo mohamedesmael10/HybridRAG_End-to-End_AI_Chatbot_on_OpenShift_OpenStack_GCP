@@ -7,7 +7,7 @@ variable "project_id" {
 variable "region" {
   type        = string
   description = "The GCP region (e.g. us-central1)"
-  default     = "us-east1"
+  default     = "us-central1"
 }
 
 variable "admin_bucket_name" {

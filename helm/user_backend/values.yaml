@@ -38,8 +38,11 @@ env:
   LLM_MAX_OUTPUT_TOKENS: "1024"
 
 # GCP service account secret
-gcpServiceAccountSecretName: "gcp-sa-key"
-gcpServiceAccountKeyFile: "service-account.json"
+# values.yaml (snippet)
+gcpServiceAccount:
+  secretName: "service-account.json"     # name of the k8s/oc secret created by CI
+  mountPath: "/app/keys"                 # directory inside container where file will appear
+  fileName: "service-account.json"       # filename inside mount (key name in the secret)
 
 # Liveness / Readiness probes
 probe:

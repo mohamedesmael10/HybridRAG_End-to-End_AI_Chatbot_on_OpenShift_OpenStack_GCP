@@ -1,0 +1,142 @@
+stages:
+  - deploy
+
+deploy_to_osd:
+  image: quay.io/openshift/origin-cli:4.13
+  stage: deploy
+  variables:
+    HELM_TIMEOUT: "10m"
+  before_script:
+    # install Helm v3
+    - curl -fsSL https://get.helm.sh/helm-v3.12.0-linux-amd64.tar.gz -o helm.tgz
+    - tar -xzf helm.tgz && mv linux-amd64/helm /usr/local/bin/helm && chmod +x /usr/local/bin/helm
+    - helm version
+  script:
+    - echo "Login to OpenShift..."
+    - oc login --token="$OC_TOKEN" --server="$OC_SERVER" --insecure-skip-tls-verify=true
+
+    # ensure project(s)
+    - export NAMESPACE_USER="${OS_PROJECT:-user-rag}"
+    - export NAMESPACE_ADMIN="${OS_ADMIN_PROJECT:-admin}"
+    - oc project "$NAMESPACE_USER" || oc new-project "$NAMESPACE_USER"
+    - oc project "$NAMESPACE_ADMIN" || true   # don't fail if already in user ns
+
+    # create/update GCP service-account secret from CI var GCP_SA_KEY
+    - |
+      echo "Creating/updating OpenShift secret 'service-account.json' from CI var GCP_SA_KEY..."
+      # Accept raw JSON or base64-encoded JSON
+      echo "$GCP_SA_KEY" | base64 -d > service-account.json 2>/dev/null || echo "$GCP_SA_KEY" > service-account.json
+      oc delete secret service-account.json -n "$NAMESPACE_USER" --ignore-not-found || true
+      oc create secret generic service-account.json -n "$NAMESPACE_USER" --from-file=service-account.json=service-account.json
+      # also create in admin namespace (if you deploy admin there)
+      oc delete secret service-account.json -n "$NAMESPACE_ADMIN" --ignore-not-found || true
+      oc create secret generic service-account.json -n "$NAMESPACE_ADMIN" --from-file=service-account.json=service-account.json
+      rm -f service-account.json
+
+    # compute LLM endpoint if not provided
+    - |
+      LLM_MODEL_ID="${LLM_MODEL_ID:-gemini-2.5-flash}"
+      PROJECT_ID="${PROJECT_ID:-$GCP_PROJECT_ID}"
+      REGION="${REGION:-us-central1}"
+      LLM_ENDPOINT="${LLM_ENDPOINT:-https://us-central1-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/publishers/google/models/${LLM_MODEL_ID}:generateContent}"
+      echo "Using LLM_ENDPOINT=${LLM_ENDPOINT}"
+
+    # helper: resolve image repo/tag from either FULL_IMAGE or ARTIFACT_REG_HOST/PROJECT_ID/REPO:IMAGE_TAG
+    - |
+      # BACKEND_IMAGE / FRONTEND_IMAGE may be passed by CI (full image: repo:tag)
+      if [ -n "$BACKEND_IMAGE" ]; then
+        BACKEND_REPO="$(echo $BACKEND_IMAGE | sed 's/:.*//')"
+        BACKEND_TAG="$(echo $BACKEND_IMAGE | sed 's/^[^:]*://')"
+      else
+        BACKEND_REPO="${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/user-backend"
+        BACKEND_TAG="${IMAGE_TAG}"
+      fi
+
+      if [ -n "$FRONTEND_IMAGE" ]; then
+        FRONT_REPO="$(echo $FRONTEND_IMAGE | sed 's/:.*//')"
+        FRONT_TAG="$(echo $FRONTEND_IMAGE | sed 's/^[^:]*://')"
+      else
+        FRONT_REPO="${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/user-frontend"
+        FRONT_TAG="${IMAGE_TAG_FRONTEND:-${IMAGE_TAG}}"
+      fi
+
+      echo "Backend image: ${BACKEND_REPO}:${BACKEND_TAG}"
+      echo "Frontend image: ${FRONT_REPO}:${FRONT_TAG}"
+
+    # -----------------------------
+    # deploy user backend (namespace: $NAMESPACE_USER)
+    # -----------------------------
+    - |
+      helm upgrade --install esmael-user-backend ./charts/user-backend \
+        --namespace "$NAMESPACE_USER" --create-namespace \
+        --wait --timeout "$HELM_TIMEOUT" \
+        --set image.repository="${BACKEND_REPO}" \
+        --set image.tag="${BACKEND_TAG}" \
+        --set env.EMBEDDING_ENDPOINT="${EMBEDDING_ENDPOINT}" \
+        --set env.CHUNK_URL="${CHUNK_URL}" \
+        --set env.VECTOR_DB_ENDPOINT="${VECTOR_DB_ENDPOINT}" \
+        --set env.VECTOR_DB_ENDPOINT_UPSERT="${VECTOR_DB_ENDPOINT_UPSERT}" \
+        --set env.DEPLOYED_INDEX_ID="${DEPLOYED_INDEX_ID}" \
+        --set env.PROJECT_ID="${PROJECT_ID}" \
+        --set env.REGION="${REGION}" \
+        --set env.MEMORY_STORE_HOST="${MEMORY_STORE_HOST:-redis}" \
+        --set env.MEMORY_STORE_PORT="${MEMORY_STORE_PORT:-6379}" \
+        --set env.LLM_ENDPOINT="${LLM_ENDPOINT}" \
+        --set env.LLM_MODEL_ID="${LLM_MODEL_ID}" \
+        --set gcpServiceAccount.secretName="service-account.json" \
+        --set gcpServiceAccount.mountPath="/app/keys" \
+        --set gcpServiceAccount.fileName="service-account.json"
+
+    # -----------------------------
+    # deploy user frontend (namespace: $NAMESPACE_USER)
+    # -----------------------------
+    - |
+      helm upgrade --install esmael-user-frontend ./charts/user-frontend \
+        --namespace "$NAMESPACE_USER" \
+        --wait --timeout "$HELM_TIMEOUT" \
+        --set image.repository="${FRONT_REPO}" \
+        --set image.tag="${FRONT_TAG}" \
+        --set env.VITE_API_URL="/api" \
+        --set env.ADMIN_CLOUD_RUN_URL="${ADMIN_CLOUD_RUN_URL:-}"
+
+    # -----------------------------
+    # deploy admin backend (namespace: $NAMESPACE_ADMIN)
+    # -----------------------------
+    - |
+      helm upgrade --install admin-backend ./charts/admin-backend \
+        --namespace "$NAMESPACE_ADMIN" --create-namespace \
+        --wait --timeout "$HELM_TIMEOUT" \
+        --set image.repository="${IMAGE_REPO:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}}/admin-backend" \
+        --set image.tag="${IMAGE_TAG}" \
+        --set env.CHUNK_URL="${CHUNK_URL}" \
+        --set env.EMBEDDING_ENDPOINT="${EMBEDDING_ENDPOINT}" \
+        --set env.VECTOR_DB_ENDPOINT="${VECTOR_DB_ENDPOINT}" \
+        --set env.VECTOR_DB_ENDPOINT_UPSERT="${VECTOR_DB_ENDPOINT_UPSERT}" \
+        --set env.DEPLOYED_INDEX_ID="${DEPLOYED_INDEX_ID}" \
+        --set env.PROJECT_ID="${PROJECT_ID}" \
+        --set env.REGION="${REGION}" \
+        --set env.MEMORY_STORE_HOST="${MEMORY_STORE_HOST:-redis}" \
+        --set env.MEMORY_STORE_PORT="${MEMORY_STORE_PORT:-6379}" \
+        --set env.LLM_ENDPOINT="${LLM_ENDPOINT}" \
+        --set env.LLM_MODEL_ID="${LLM_MODEL_ID}" \
+        --set gcpServiceAccount.secretName="service-account.json" \
+        --set gcpServiceAccount.mountPath="/app/keys" \
+        --set gcpServiceAccount.fileName="service-account.json"
+
+    # -----------------------------
+    # deploy admin frontend (namespace: $NAMESPACE_ADMIN)
+    # -----------------------------
+    - |
+      helm upgrade --install admin-frontend ./charts/admin-frontend \
+        --namespace "$NAMESPACE_ADMIN" \
+        --wait --timeout "$HELM_TIMEOUT" \
+        --set image.repository="${IMAGE_REPO:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}}/admin-frontend" \
+        --set image.tag="${IMAGE_TAG_FRONTEND:-${IMAGE_TAG}}" \
+        --set env.VITE_API_URL="/api" \
+        --set env.ADMIN_CLOUD_RUN_URL="/api"
+
+  environment:
+    name: osd/sandbox
+  rules:
+    - when: always
+

@@ -2,6 +2,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "user-backend.fullname" . }}
+  labels:
+    app: {{ include "user-backend.name" . }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -14,9 +16,8 @@ spec:
     spec:
       containers:
         - name: user-backend
-          image:
-            repository: "{{ .Values.image.repository | default "nginx" }}"
-            tag: "{{ .Values.image.tag | default "latest" }}"
+          # container image must be a string "repo:tag"
+          image: {{ printf "%s:%s" (default "nginx" .Values.image.repository) (default "latest" .Values.image.tag) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.service.targetPort }}
@@ -35,11 +36,13 @@ spec:
               value: "{{ .Values.env.MEMORY_STORE_HOST }}"
             - name: MEMORY_STORE_PORT
               value: "{{ .Values.env.MEMORY_STORE_PORT }}"
+{{- if .Values.secrets.memoryStoreSecretName }}
             - name: MEMORY_STORE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.gcpServiceAccountSecretName }}
-                  key: MEMORY_STORE_PASSWORD
+                  name: {{ .Values.secrets.memoryStoreSecretName | quote }}
+                  key: {{ .Values.secrets.memoryStorePasswordKey | default "MEMORY_STORE_PASSWORD" | quote }}
+{{- end }}
             - name: PROJECT_ID
               value: "{{ .Values.env.PROJECT_ID }}"
             - name: REGION
@@ -52,11 +55,12 @@ spec:
               value: "{{ .Values.env.LLM_TEMPERATURE }}"
             - name: LLM_MAX_OUTPUT_TOKENS
               value: "{{ .Values.env.LLM_MAX_OUTPUT_TOKENS }}"
-             - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: "/app/keys/{{ .Values.gcpServiceAccountKeyFile }}"
+            # GOOGLE_APPLICATION_CREDENTIALS points to the mounted secret file
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "{{ (or .Values.gcpServiceAccount.mountPath "/app/keys") | quote }}/{{ (or .Values.gcpServiceAccount.fileName "service-account.json") }}"
           volumeMounts:
             - name: gcp-sa
-              mountPath: /app/keys
+              mountPath: {{ (or .Values.gcpServiceAccount.mountPath "/app/keys") | quote }}
               readOnly: true
           readinessProbe:
             httpGet:
@@ -82,4 +86,8 @@ spec:
       volumes:
         - name: gcp-sa
           secret:
-            secretName: {{ .Values.gcpServiceAccountSecretName }}
+            secretName: {{ (or .Values.gcpServiceAccount.secretName "service-account.json") | quote }}
+            # optional: if you want to force the file key -> filename mapping uncomment and adjust
+            # items:
+            #   - key: {{ (or .Values.gcpServiceAccount.fileName "service-account.json") | quote }}
+            #     path: {{ (or .Values.gcpServiceAccount.fileName "service-account.json") | quote }}
