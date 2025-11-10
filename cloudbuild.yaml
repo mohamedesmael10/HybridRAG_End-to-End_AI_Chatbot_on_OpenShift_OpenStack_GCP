@@ -103,7 +103,7 @@ steps:
         # Enable debug mode and safe error handling
         set -eux  # Merged set options: exit on error, treat unset variables as error, and print commands
 
-        echo "=== 🚀 Starting Terraform Deployment ==="
+        echo "===  Starting Terraform Deployment ==="
         echo "PROJECT_ID=${_PROJECT_ID}"
         echo "REGION=${_REGION}"
         echo "ARTIFACT_REG_HOST=${_ARTIFACT_REG_HOST}"
@@ -111,23 +111,23 @@ steps:
         echo "SHORT_SHA=${SHORT_SHA}"
 
         # Ensure Terraform directory exists
-        cd Terraform/terraform-infra || { echo "❌ Terraform directory not found!"; exit 1; }
+        cd Terraform/terraform-infra || { echo " Terraform directory not found!"; exit 1; }
         ls -la
 
-        echo "=== 🧠 Terraform Version ==="
-        terraform version || { echo "❌ Terraform not found!"; exit 1; }
+        echo "===  Terraform Version ==="
+        terraform version || { echo " Terraform not found!"; exit 1; }
 
-        echo "=== 🧩 Terraform Init ==="
+        echo "===  Terraform Init ==="
         terraform init -input=false -no-color -upgrade || {
-          echo "❌ Terraform init failed"; exit 1;
+          echo " Terraform init failed"; exit 1;
         }
 
-        echo "=== ✅ Terraform Validate ==="
+        echo "===  Terraform Validate ==="
         terraform validate -no-color || {
-          echo "❌ Terraform validate failed"; exit 1;
+          echo " Terraform validate failed"; exit 1;
         }
 
-        echo "=== 📋 Terraform Plan ==="
+        echo "===  Terraform Plan ==="
         terraform plan -input=false -no-color -lock=false \
           -var="project_id=${_PROJECT_ID}" \
           -var="region=${_REGION}" \
@@ -135,15 +135,99 @@ steps:
           -var="repo=${_REPO}" \
           -var="chunk_image_tag=${SHORT_SHA}" \
           -out=tfplan || {
-            echo "❌ Terraform plan failed"; exit 1;
+            echo " Terraform plan failed"; exit 1;
           }
 
-        echo "=== 🚀 Terraform Apply ==="
+        echo "===  Terraform Apply ==="
         terraform apply -auto-approve -no-color tfplan || {
-          echo "❌ Terraform apply failed"; exit 1;
+          echo " Terraform apply failed"; exit 1;
         }
 
-        echo "✅ Terraform apply completed successfully!"
+        echo " Terraform apply completed successfully!"
+
+        echo "=== Export terraform outputs to /workspace/tf_outputs.json ==="
+        terraform output -json > /workspace/tf_outputs.json
+        echo "Wrote /workspace/tf_outputs.json"
+
+
+# notify GitLab pipeline with Terraform outputs
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+  id: 'notify-gitlab'
+  entrypoint: 'bash'
+  args:
+    - -c
+    - |
+        set -eux
+
+        # ensure jq + curl present
+        apt-get update -y
+        apt-get install -y -q jq curl
+
+        TF_JSON_FILE="/workspace/tf_outputs.json"
+        if [ ! -f "${TF_JSON_FILE}" ]; then
+          echo "ERROR: Terraform outputs file not found: ${TF_JSON_FILE}"
+          exit 1
+        fi
+
+        TF_JSON=$(cat "${TF_JSON_FILE}")
+
+        # Terraform outputs
+        EMBEDDING_ENDPOINT=$(echo "${TF_JSON}" | jq -r '.embedding_endpoint.value // empty')
+        CHUNK_URL=$(echo "${TF_JSON}" | jq -r '.chunk_url.value // empty')
+        VECTOR_DB_ENDPOINT=$(echo "${TF_JSON}" | jq -r '.vector_db_endpoint_find_neighbors.value // empty')
+        VECTOR_DB_ENDPOINT_UPSERT=$(echo "${TF_JSON}" | jq -r '.vector_db_endpoint_upsert.value // empty')
+        DEPLOYED_INDEX_ID=$(echo "${TF_JSON}" | jq -r '.deployed_index_id.value // empty')
+        TF_PROJECT_ID=$(echo "${TF_JSON}" | jq -r '.project_id.value // empty')
+        TF_REGION=$(echo "${TF_JSON}" | jq -r '.region.value // empty')
+        CHUNK_IMAGE_FULL=$(echo "${TF_JSON}" | jq -r '.chunk_image_full.value // empty')
+
+        # Cloud Build substitution values (available as env vars)
+        # SHORT_SHA is the commit sha, _REPO/_ARTIFACT_REG_HOST are your substitutions
+        IMAGE_TAG="${SHORT_SHA:-}"
+        REPO="${_REPO:-}"
+        ARTIFACT_REG_HOST="${_ARTIFACT_REG_HOST:-}"
+        # Optionally compute default chunk image if tf didn't provide it
+        if [ -z "${CHUNK_IMAGE_FULL}" ] && [ -n "${ARTIFACT_REG_HOST}" ] && [ -n "${TF_PROJECT_ID}" ] && [ -n "${REPO}" ] && [ -n "${IMAGE_TAG}" ]; then
+          CHUNK_IMAGE_FULL="${ARTIFACT_REG_HOST}/${TF_PROJECT_ID}/${REPO}/chunk-image:${IMAGE_TAG}"
+        fi
+
+        echo "Variables to send to GitLab:"
+        echo " IMAGE_TAG=${IMAGE_TAG}"
+        echo " REPO=${REPO}"
+        echo " ARTIFACT_REG_HOST=${ARTIFACT_REG_HOST}"
+        echo " CHUNK_IMAGE_FULL=${CHUNK_IMAGE_FULL}"
+
+        # Read GitLab token from Secret Manager (Cloud Build SA must have secretAccessor)
+        GITLAB_TOKEN="$(gcloud secrets versions access latest --secret="GITLAB" --project="${_PROJECT_ID}" 2>/dev/null || true)"
+        if [ -z "${GITLAB_TOKEN}" ]; then
+          echo "ERROR: Could not read GITLAB secret from Secret Manager"
+          exit 1
+        fi
+
+        API="https://gitlab.com/api/v4/projects/${_GITLAB_PROJ_ID}/trigger/pipeline"
+
+        # POST to GitLab trigger and save response + http code (for debugging)
+        HTTP_FILE="/workspace/gitlab_trigger_response.txt"
+        CODE_FILE="/workspace/gitlab_trigger_httpcode.txt"
+
+        curl -s -o "${HTTP_FILE}" -w "%{http_code}" -X POST \
+          -F token="${GITLAB_TOKEN}" \
+          -F ref="${_GITLAB_REF}" \
+          -F "variables[IMAGE_TAG]=${IMAGE_TAG}" \
+          -F "variables[REPO]=${REPO}" \
+          -F "variables[ARTIFACT_REG_HOST]=${ARTIFACT_REG_HOST}" \
+          -F "variables[CHUNK_IMAGE_FULL]=${CHUNK_IMAGE_FULL}" \
+          -F "variables[EMBEDDING_ENDPOINT]=${EMBEDDING_ENDPOINT}" \
+          -F "variables[CHUNK_URL]=${CHUNK_URL}" \
+          -F "variables[VECTOR_DB_ENDPOINT]=${VECTOR_DB_ENDPOINT}" \
+          -F "variables[VECTOR_DB_ENDPOINT_UPSERT]=${VECTOR_DB_ENDPOINT_UPSERT}" \
+          -F "variables[DEPLOYED_INDEX_ID]=${DEPLOYED_INDEX_ID}" \
+          -F "variables[PROJECT_ID]=${TF_PROJECT_ID}" \
+          -F "variables[REGION]=${TF_REGION}" \
+          "${API}" > "${CODE_FILE}"
+
+        echo "GitLab body -> ${HTTP_FILE}"
+        echo "GitLab httpcode -> ${CODE_FILE}"
 
 
 # # optionally notify GitLab and pass $SHORT_SHA

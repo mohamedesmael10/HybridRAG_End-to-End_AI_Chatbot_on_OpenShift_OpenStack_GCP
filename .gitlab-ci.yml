@@ -1,6 +1,3 @@
-stages:
-  - deploy
-
 deploy_to_osd:
   image: quay.io/openshift/origin-cli:4.13
   stage: deploy
@@ -12,6 +9,8 @@ deploy_to_osd:
     - tar -xzf helm.tgz && mv linux-amd64/helm /usr/local/bin/helm && chmod +x /usr/local/bin/helm
     - helm version
   script:
+    - set -euo pipefail
+
     - echo "Login to OpenShift..."
     - oc login --token="$OC_TOKEN" --server="$OC_SERVER" --insecure-skip-tls-verify=true
 
@@ -21,17 +20,35 @@ deploy_to_osd:
     - oc project "$NAMESPACE_USER" || oc new-project "$NAMESPACE_USER"
     - oc project "$NAMESPACE_ADMIN" || true   # don't fail if already in user ns
 
-    # create/update GCP service-account secret from CI var GCP_SA_KEY
+    # === create/update GCP service-account secret from CI var GCP_SA_KEY (base64 preferred) ===
     - |
       echo "Creating/updating OpenShift secret 'service-account.json' from CI var GCP_SA_KEY..."
-      # Accept raw JSON or base64-encoded JSON
-      echo "$GCP_SA_KEY" | base64 -d > service-account.json 2>/dev/null || echo "$GCP_SA_KEY" > service-account.json
+      TMPFILE="$(mktemp /tmp/gcp-sa.XXXXXX)"
+      # Try decode base64 -> if fails, assume CI var contains raw JSON
+      if echo "$GCP_SA_KEY" | base64 --decode > "$TMPFILE" 2>/dev/null; then
+        echo "GCP_SA_KEY decoded from base64 (hidden)."
+      else
+        echo "GCP_SA_KEY appears not base64; writing raw content to temp file."
+        echo "$GCP_SA_KEY" > "$TMPFILE"
+      fi
+      # optional: quick JSON validation if python is present (fail fast on invalid JSON)
+      if command -v python3 >/dev/null 2>&1; then
+        if ! python3 -c "import json,sys; json.load(open('$TMPFILE'))" 2>/dev/null; then
+          echo "ERROR: service-account JSON is invalid"; rm -f "$TMPFILE"; exit 1
+        fi
+      elif command -v python >/dev/null 2>&1; then
+        if ! python -c "import json,sys; json.load(open('$TMPFILE'))" 2>/dev/null; then
+          echo "ERROR: service-account JSON is invalid"; rm -f "$TMPFILE"; exit 1
+        fi
+      fi
+      # create secret in user namespace (key name = service-account.json)
       oc delete secret service-account.json -n "$NAMESPACE_USER" --ignore-not-found || true
-      oc create secret generic service-account.json -n "$NAMESPACE_USER" --from-file=service-account.json=service-account.json
-      # also create in admin namespace (if you deploy admin there)
+      oc create secret generic service-account.json -n "$NAMESPACE_USER" --from-file=service-account.json="$TMPFILE"
+      # create secret in admin namespace (if used)
       oc delete secret service-account.json -n "$NAMESPACE_ADMIN" --ignore-not-found || true
-      oc create secret generic service-account.json -n "$NAMESPACE_ADMIN" --from-file=service-account.json=service-account.json
-      rm -f service-account.json
+      oc create secret generic service-account.json -n "$NAMESPACE_ADMIN" --from-file=service-account.json="$TMPFILE"
+      # remove temp file immediately (try shred, fallback to rm)
+      shred -u "$TMPFILE" 2>/dev/null || rm -f "$TMPFILE"
 
     # compute LLM endpoint if not provided
     - |
@@ -43,7 +60,6 @@ deploy_to_osd:
 
     # helper: resolve image repo/tag from either FULL_IMAGE or ARTIFACT_REG_HOST/PROJECT_ID/REPO:IMAGE_TAG
     - |
-      # BACKEND_IMAGE / FRONTEND_IMAGE may be passed by CI (full image: repo:tag)
       if [ -n "$BACKEND_IMAGE" ]; then
         BACKEND_REPO="$(echo $BACKEND_IMAGE | sed 's/:.*//')"
         BACKEND_TAG="$(echo $BACKEND_IMAGE | sed 's/^[^:]*://')"
@@ -63,9 +79,7 @@ deploy_to_osd:
       echo "Backend image: ${BACKEND_REPO}:${BACKEND_TAG}"
       echo "Frontend image: ${FRONT_REPO}:${FRONT_TAG}"
 
-    # -----------------------------
-    # deploy user backend (namespace: $NAMESPACE_USER)
-    # -----------------------------
+    # deploy user backend
     - |
       helm upgrade --install esmael-user-backend ./charts/user-backend \
         --namespace "$NAMESPACE_USER" --create-namespace \
@@ -87,9 +101,7 @@ deploy_to_osd:
         --set gcpServiceAccount.mountPath="/app/keys" \
         --set gcpServiceAccount.fileName="service-account.json"
 
-    # -----------------------------
-    # deploy user frontend (namespace: $NAMESPACE_USER)
-    # -----------------------------
+    # deploy user frontend
     - |
       helm upgrade --install esmael-user-frontend ./charts/user-frontend \
         --namespace "$NAMESPACE_USER" \
@@ -99,9 +111,7 @@ deploy_to_osd:
         --set env.VITE_API_URL="/api" \
         --set env.ADMIN_CLOUD_RUN_URL="${ADMIN_CLOUD_RUN_URL:-}"
 
-    # -----------------------------
-    # deploy admin backend (namespace: $NAMESPACE_ADMIN)
-    # -----------------------------
+    # deploy admin backend
     - |
       helm upgrade --install admin-backend ./charts/admin-backend \
         --namespace "$NAMESPACE_ADMIN" --create-namespace \
@@ -123,9 +133,7 @@ deploy_to_osd:
         --set gcpServiceAccount.mountPath="/app/keys" \
         --set gcpServiceAccount.fileName="service-account.json"
 
-    # -----------------------------
-    # deploy admin frontend (namespace: $NAMESPACE_ADMIN)
-    # -----------------------------
+    # deploy admin frontend
     - |
       helm upgrade --install admin-frontend ./charts/admin-frontend \
         --namespace "$NAMESPACE_ADMIN" \
@@ -139,4 +147,3 @@ deploy_to_osd:
     name: osd/sandbox
   rules:
     - when: always
-
