@@ -18,6 +18,16 @@ WORKDIR /usr/share/nginx/html
 RUN rm -rf ./*
 COPY --from=builder /app/dist .
 
+
+# after COPY --from=builder /app/dist /usr/share/nginx/html
+RUN chmod -R a+rwX /usr/share/nginx/html \
+ && mkdir -p /tmp/nginx/client_temp /tmp/nginx/proxy_temp /tmp/nginx/fastcgi_temp \
+ && chmod -R 0777 /tmp/nginx \
+ && sed -i "/http[[:space:]]*{/a \
+    \ \ client_body_temp_path /tmp/nginx/client_temp; \
+    \ \ proxy_temp_path /tmp/nginx/proxy_temp; \
+    \ \ fastcgi_temp_path /tmp/nginx/fastcgi_temp;" /etc/nginx/nginx.conf
+
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 

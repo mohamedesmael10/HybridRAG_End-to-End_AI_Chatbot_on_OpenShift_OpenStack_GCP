@@ -1,16 +1,19 @@
 FROM python:3.12-slim AS builder
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 FROM python:3.12-slim
 WORKDIR /app
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
 
+# Copy virtual environment
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy app source
 COPY . .
 
-# Don't bake secrets
+ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 

@@ -1,48 +1,32 @@
+# Dockerfile (OpenShift / Kubernetes / local friendly)
 FROM python:3.12-slim AS builder
-
 WORKDIR /app
 
 COPY requirements.txt .
-
-RUN pip install --user -r requirements.txt 
+# create venv and install dependences into it
+RUN python -m venv /opt/venv \
+ && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 FROM python:3.12-slim AS final
-
 WORKDIR /app
 
-COPY --from=builder /root/.local /root/.local
+# Copy venv created in builder
+COPY --from=builder /opt/venv /opt/venv
 
-ENV PATH=/root/.local/bin:$PATH
+# Copy application code
+COPY . .
 
-ARG EMBEDDING_ENDPOINT
-ENV EMBEDDING_ENDPOINT=${EMBEDDING_ENDPOINT}
+# Ensure venv is usable by arbitrary non-root UIDs (OpenShift random UID)
+# make group 0 own the venv and give group read/execute
+RUN chown -R 0:0 /opt/venv \
+ && chmod -R g+rwX /opt/venv \
+ && mkdir -p /app/logs \
+ && chown -R 0:0 /app \
+ && chmod -R g+rwX /app
 
-ARG CHUNK_URL
-ENV CHUNK_URL=${CHUNK_URL}
-
-ARG VECTOR_DB_ENDPOINT
-ENV VECTOR_DB_ENDPOINT=${VECTOR_DB_ENDPOINT}
-
-ARG DEPLOYED_INDEX_ID
-ENV DEPLOYED_INDEX_ID=${DEPLOYED_INDEX_ID}
-
-ARG MEMORY_STORE_HOST
-ENV MEMORY_STORE_HOST=${MEMORY_STORE_HOST}
-
-ARG MEMORY_STORE_PORT
-ENV MEMORY_STORE_PORT=${MEMORY_STORE_PORT}
-
-ARG PROJECT_ID
-ENV PROJECT_ID=${PROJECT_ID}
-
-ARG REGION
-ENV REGION=${REGION}
-
-ARG LLM_MODEL_ID
-ENV LLM_MODEL_ID=${LLM_MODEL_ID}
-
-COPY main.py .
-
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
-ENTRYPOINT ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Use exec form
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

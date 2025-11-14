@@ -23,15 +23,15 @@ env:
   VITE_API_URL: "/api"
   ADMIN_CLOUD_RUN_URL: "/api"
 
-# ingress:
-#   enabled: false
-#   className: ""
-#   annotations: {}
-#   hosts:
-#     - host: frontend.example.com
-#       paths:
-#         - /
-#   tls: []
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: frontend.example.com
+      paths:
+        - /
+  tls: []
 
 route:
   enabled: false

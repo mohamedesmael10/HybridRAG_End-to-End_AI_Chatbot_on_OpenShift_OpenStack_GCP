@@ -1,51 +1,30 @@
-# {{- if .Values.ingress.enabled }}
-# apiVersion: networking.k8s.io/v1
-# kind: Ingress
-# metadata:
-#   name: {{ .Release.Name }}-frontend
-#   annotations: {{ toYaml .Values.ingress.annotations | nindent 4 }}
-# spec:
-#   {{- if .Values.ingress.className }}
-#   ingressClassName: {{ .Values.ingress.className }}
-#   {{- end }}
-#   rules:
-#     {{- range .Values.ingress.hosts }}
-#     - host: {{ .host }}
-#       http:
-#         paths:
-#           {{- range .paths }}
-#           - path: {{ . }}
-#             pathType: Prefix
-#             backend:
-#               service:
-#                 name: {{ $.Release.Name }}-frontend
-#                 port:
-#                   number: {{ $.Values.service.port }}
-#           {{- end }}
-#     {{- end }}
-#   {{- if .Values.ingress.tls }}
-#   tls:
-#   {{ toYaml .Values.ingress.tls | nindent 2 }}
-#   {{- end }}
-# {{- end }}
-
-{{- if .Values.route.enabled }}
-apiVersion: route.openshift.io/v1
-kind: Route
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
 metadata:
-  name: {{ .Release.Name }}-osd
-  annotations: {{ toYaml .Values.route.annotations | nindent 4 }}
+  name: {{ .Release.Name }}-user-frontend
+  annotations: {{ toYaml .Values.ingress.annotations | nindent 4 }}
 spec:
-  to:
-    kind: Service
-    name: {{ .Release.Name }}-osd
-    weight: 100
-  port:
-    targetPort: {{ .Values.service.targetPort }}
-  {{- if .Values.route.tls.enabled }}
-  tls:
-    termination: {{ .Values.route.tls.termination | default "edge" }}
-    insecureEdgeTerminationPolicy: {{ .Values.route.tls.insecureEdgeTerminationPolicy | default "Redirect" }}
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
   {{- end }}
-  host: {{ .Values.route.host | default "" }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Release.Name }}-user-frontend
+                port:
+                  number: {{ $.Values.service.port }}
+          {{- end }}
+    {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+  {{ toYaml .Values.ingress.tls | nindent 2 }}
+  {{- end }}
 {{- end }}

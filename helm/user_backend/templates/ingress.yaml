@@ -1,52 +1,28 @@
-# {{- if .Values.ingress.enabled }}
-# apiVersion: networking.k8s.io/v1
-# kind: Ingress
-# metadata:
-#   name: {{ include "user-backend.fullname" . }}
-#   annotations: {{ toYaml .Values.ingress.annotations | nindent 4 }}
-# spec:
-#   ingressClassName: {{ .Values.ingress.className | default "" }}
-#   rules:
-#   {{- range .Values.ingress.hosts }}
-#     - host: {{ .host }}
-#       http:
-#         paths:
-#         {{- range .paths }}
-#           - path: {{ . }}
-#             pathType: Prefix
-#             backend:
-#               service:
-#                 name: {{ include "user-backend.fullname" $ }}
-#                 port:
-#                   number: {{ $.Values.service.port }}
-#         {{- end }}
-#   {{- end }}
-#   {{- if .Values.ingress.tls }}
-#   tls:
-#   {{- toYaml .Values.ingress.tls | nindent 4 }}
-#   {{- end }}
-# {{- end }}
-
-{{- if .Values.route.enabled }}
-apiVersion: route.openshift.io/v1
-kind: Route
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
 metadata:
   name: {{ include "user-backend.fullname" . }}
-  annotations: {{ toYaml .Values.route.annotations | nindent 4 }}
+  annotations: {{ toYaml .Values.ingress.annotations | nindent 4 }}
 spec:
-  to:
-    kind: Service
-    name: {{ include "user-backend.fullname" . }}
-    weight: 100
-  port:
-    targetPort: {{ .Values.service.targetPort }}
-  tls:
-  {{- if .Values.route.tls.enabled }}
-    termination: {{ .Values.route.tls.termination | default "edge" }}
-    insecureEdgeTerminationPolicy: {{ .Values.route.tls.insecureEdgeTerminationPolicy | default "Redirect" }}
-  {{- else }}
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
+  ingressClassName: {{ .Values.ingress.className | default "" }}
+  rules:
+  {{- range .Values.ingress.hosts }}
+    - host: {{ .host }}
+      http:
+        paths:
+        {{- range .paths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "user-backend.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port }}
+        {{- end }}
   {{- end }}
-  host: {{ .Values.route.host | default "" }}
+  {{- if .Values.ingress.tls }}
+  tls:
+  {{- toYaml .Values.ingress.tls | nindent 4 }}
+  {{- end }}
 {{- end }}

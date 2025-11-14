@@ -1,51 +1,56 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-frontend
+  name: {{ include "user-frontend.fullname" . }}
   labels:
-    app: {{ .Release.Name }}-frontend
+{{ include "user-frontend.selectorLabels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-frontend
+{{ include "user-frontend.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-frontend
+{{ include "user-frontend.selectorLabels" . | nindent 8 }}
     spec:
       containers:
-        - name: frontend
-          image:
-            repository: "{{ .Values.image.repository | default "nginx" }}"
-            tag: "{{ .Values.image.tag | default "latest" }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+        - name: user-frontend
+          image: {{ printf "%s:%s" (default "nginx" .Values.image.repository) (default "latest" .Values.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" | quote }}
           ports:
             - containerPort: {{ .Values.service.targetPort }}
           env:
             - name: ADMIN_CLOUD_RUN_URL
               value: "{{ .Values.env.ADMIN_CLOUD_RUN_URL }}"
-            # If you want the built app to use a runtime env var (not recommended for Vite-built static bundle), expose it here:
             - name: VITE_API_URL
               value: "{{ .Values.env.VITE_API_URL }}"
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
           readinessProbe:
             httpGet:
-              path: /health
+              path: {{ .Values.probe.path | default "/" | quote }}
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds }}
-            periodSeconds: {{ .Values.probe.periodSeconds }}
-            timeoutSeconds: {{ .Values.probe.timeoutSeconds }}
+            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds | default 5 }}
+            periodSeconds: {{ .Values.probe.periodSeconds | default 10 }}
+            timeoutSeconds: {{ .Values.probe.timeoutSeconds | default 3 }}
           livenessProbe:
             httpGet:
-              path: /health
+              path: {{ .Values.probe.path | default "/" | quote }}
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds }}
-            periodSeconds: {{ .Values.probe.periodSeconds }}
-            timeoutSeconds: {{ .Values.probe.timeoutSeconds }}
+            initialDelaySeconds: {{ .Values.probe.livenessInitialDelaySeconds | default 30 }}
+            periodSeconds: {{ .Values.probe.livenessPeriodSeconds | default 20 }}
+            timeoutSeconds: {{ .Values.probe.timeoutSeconds | default 3 }}
           resources:
             limits:
-              cpu: {{ .Values.resources.limits.cpu }}
-              memory: {{ .Values.resources.limits.memory }}
+              cpu: {{ .Values.resources.limits.cpu | quote }}
+              memory: {{ .Values.resources.limits.memory | quote }}
             requests:
-              cpu: {{ .Values.resources.requests.cpu }}
-              memory: {{ .Values.resources.requests.memory }}
+              cpu: {{ .Values.resources.requests.cpu | quote }}
+              memory: {{ .Values.resources.requests.memory | quote }}
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: {{ include "user-frontend.fullname" . }}-nginx-config

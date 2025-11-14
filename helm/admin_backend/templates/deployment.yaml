@@ -16,9 +16,7 @@ spec:
     spec:
       containers:
         - name: admin-backend
-          image:
-            repository: "{{ .Values.image.repository | default "nginx" }}"
-            tag: "{{ .Values.image.tag | default "latest" }}"
+          image: {{ printf "%s:%s" (default "nginx" .Values.image.repository) (default "latest" .Values.image.tag) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.service.targetPort }}
@@ -60,11 +58,12 @@ spec:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
               memory: {{ .Values.resources.requests.memory }}
-          volumeMounts:  
+          
+          volumeMounts:
             - name: gcp-sa
-              mountPath: /app/keys
+              mountPath: {{ .Values.gcpServiceAccount.mountPath }}
               readOnly: true  
       volumes:
         - name: gcp-sa
           secret:
-            secretName: {{ .Values.gcpServiceAccountSecretName }}
+            secretName: {{ .Values.gcpServiceAccount.secretName }}

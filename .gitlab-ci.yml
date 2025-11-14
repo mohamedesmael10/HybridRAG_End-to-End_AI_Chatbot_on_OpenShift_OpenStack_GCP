@@ -1,123 +1,169 @@
 deploy_to_osd:
   image: quay.io/openshift/origin-cli:4.13
-  stage: deploy
+  stage: production-deploy  
+
   variables:
     HELM_TIMEOUT: "10m"
+    OS_PROJECT: "mohamed-esmael-dev"
+    OS_ADMIN_PROJECT: "mohamed-esmael-dev"
+
   before_script:
-    # install Helm v3
     - curl -fsSL https://get.helm.sh/helm-v3.12.0-linux-amd64.tar.gz -o helm.tgz
     - tar -xzf helm.tgz && mv linux-amd64/helm /usr/local/bin/helm && chmod +x /usr/local/bin/helm
     - helm version
-  script:
-    - set -euo pipefail
 
-    - echo "Login to OpenShift..."
+  script:
+    # -------------------------
+    # BASIC SETUP
+    # -------------------------
+    - set -euo pipefail
+    - echo "Logging into OpenShift..."
     - oc login --token="$OC_TOKEN" --server="$OC_SERVER" --insecure-skip-tls-verify=true
 
-    # ensure project(s)
-    - export NAMESPACE_USER="${OS_PROJECT:-user-rag}"
-    - export NAMESPACE_ADMIN="${OS_ADMIN_PROJECT:-admin}"
-    - oc project "$NAMESPACE_USER" || oc new-project "$NAMESPACE_USER"
-    - oc project "$NAMESPACE_ADMIN" || true   # don't fail if already in user ns
+    - NAMESPACE_USER="${OS_PROJECT:-mohamed-esmael-dev}"
+    - NAMESPACE_ADMIN="${OS_ADMIN_PROJECT:-mohamed-esmael-dev}"
 
-    # === create/update GCP service-account secret from CI var GCP_SA_KEY (base64 preferred) ===
+    - oc project "$NAMESPACE_USER"  || true
+    - oc project "$NAMESPACE_ADMIN" || true
+
+    # -------------------------
+    # CREATE GCP SECRET
+    # -------------------------
+    - echo "=== Creating GCP secret ==="
     - |
-      echo "Creating/updating OpenShift secret 'service-account.json' from CI var GCP_SA_KEY..."
-      TMPFILE="$(mktemp /tmp/gcp-sa.XXXXXX)"
-      # Try decode base64 -> if fails, assume CI var contains raw JSON
-      if echo "$GCP_SA_KEY" | base64 --decode > "$TMPFILE" 2>/dev/null; then
-        echo "GCP_SA_KEY decoded from base64 (hidden)."
-      else
-        echo "GCP_SA_KEY appears not base64; writing raw content to temp file."
-        echo "$GCP_SA_KEY" > "$TMPFILE"
-      fi
-      # optional: quick JSON validation if python is present (fail fast on invalid JSON)
-      if command -v python3 >/dev/null 2>&1; then
-        if ! python3 -c "import json,sys; json.load(open('$TMPFILE'))" 2>/dev/null; then
-          echo "ERROR: service-account JSON is invalid"; rm -f "$TMPFILE"; exit 1
+        if [ -n "${GCP_SA_KEY:-}" ]; then
+          echo "Creating/updating OpenShift secret 'service-account.json' from CI var GCP_SA_KEY..."
+          TMPFILE="$(mktemp /tmp/gcp-sa.XXXXXX)"
+          if echo "$GCP_SA_KEY" | base64 --decode > "$TMPFILE" 2>/dev/null; then
+            echo "GCP_SA_KEY decoded from base64 (hidden)."
+          else
+            echo "GCP_SA_KEY appears not base64; writing raw content to temp file."
+            echo "$GCP_SA_KEY" > "$TMPFILE"
+          fi
+          # quick JSON validation (if python present)
+          if command -v python3 >/dev/null 2>&1; then
+            if ! python3 -c "import json,sys; json.load(open('$TMPFILE'))" 2>/dev/null; then
+              echo "ERROR: service-account JSON is invalid"; rm -f "$TMPFILE"; exit 1
+            fi
+          elif command -v python >/dev/null 2>&1; then
+            if ! python -c "import json,sys; json.load(open('$TMPFILE'))" 2>/dev/null; then
+              echo "ERROR: service-account JSON is invalid"; rm -f "$TMPFILE"; exit 1
+            fi
+          fi
+          oc delete secret service-account.json -n "$NAMESPACE_USER" --ignore-not-found || true
+          oc create secret generic service-account.json -n "$NAMESPACE_USER" --from-file=service-account.json="$TMPFILE"
+          oc delete secret service-account.json -n "$NAMESPACE_ADMIN" --ignore-not-found || true
+          oc create secret generic service-account.json -n "$NAMESPACE_ADMIN" --from-file=service-account.json="$TMPFILE"
+          shred -u "$TMPFILE" 2>/dev/null || rm -f "$TMPFILE"
+        else
+          echo "GCP_SA_KEY not provided — skipping service-account secret creation."
         fi
-      elif command -v python >/dev/null 2>&1; then
-        if ! python -c "import json,sys; json.load(open('$TMPFILE'))" 2>/dev/null; then
-          echo "ERROR: service-account JSON is invalid"; rm -f "$TMPFILE"; exit 1
+
+    # -------------------------
+    # IMAGE SPLITTING FUNCTION
+    # -------------------------
+    - |
+      # Compute CHUNK_IMAGE_FULL if not supplied (derived from artifact registry and IMAGE_TAG)
+      if [ -z "${CHUNK_IMAGE_FULL:-}" ] && [ -n "${ARTIFACT_REG_HOST:-}" ] && [ -n "${PROJECT_ID:-}" ] && [ -n "${REPO:-}" ] && [ -n "${IMAGE_TAG:-}" ]; then
+          CHUNK_IMAGE_FULL="${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/chunk-image:${IMAGE_TAG}"
+      fi
+
+      split_repo_tag() {
+        full="$1"
+        repo="${full%%:*}"
+        tag="${full#*:}"
+
+        if [ "$repo" = "$tag" ]; then
+          tag="latest"
         fi
-      fi
-      # create secret in user namespace (key name = service-account.json)
-      oc delete secret service-account.json -n "$NAMESPACE_USER" --ignore-not-found || true
-      oc create secret generic service-account.json -n "$NAMESPACE_USER" --from-file=service-account.json="$TMPFILE"
-      # create secret in admin namespace (if used)
-      oc delete secret service-account.json -n "$NAMESPACE_ADMIN" --ignore-not-found || true
-      oc create secret generic service-account.json -n "$NAMESPACE_ADMIN" --from-file=service-account.json="$TMPFILE"
-      # remove temp file immediately (try shred, fallback to rm)
-      shred -u "$TMPFILE" 2>/dev/null || rm -f "$TMPFILE"
 
-    # compute LLM endpoint if not provided
-    - |
-      LLM_MODEL_ID="${LLM_MODEL_ID:-gemini-2.5-flash}"
-      PROJECT_ID="${PROJECT_ID:-$GCP_PROJECT_ID}"
-      REGION="${REGION:-us-central1}"
-      LLM_ENDPOINT="${LLM_ENDPOINT:-https://us-central1-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/publishers/google/models/${LLM_MODEL_ID}:generateContent}"
-      echo "Using LLM_ENDPOINT=${LLM_ENDPOINT}"
+        printf "%s|%s" "$repo" "$tag"
+      }
 
-    # helper: resolve image repo/tag from either FULL_IMAGE or ARTIFACT_REG_HOST/PROJECT_ID/REPO:IMAGE_TAG
+    # -------------------------
+    # RESOLVE IMAGES
+    # -------------------------
+    - echo "=== Resolving image names ==="
+    - USER_BACKEND_IMAGE="${USER_BACKEND_IMAGE:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/user-backend:${IMAGE_TAG}}"
+    - USER_FRONTEND_IMAGE="${USER_FRONTEND_IMAGE:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/user-frontend:${IMAGE_TAG}}"
+    - ADMIN_BACKEND_IMAGE="${ADMIN_BACKEND_IMAGE:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/admin-backend:${IMAGE_TAG}}"
+    - ADMIN_FRONTEND_IMAGE="${ADMIN_FRONTEND_IMAGE:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/admin-frontend:${IMAGE_TAG}}"
+    - CHUNK_IMAGE="${CHUNK_IMAGE:-${CHUNK_IMAGE_FULL:-}}"
+
+    - IFS='|' read -r USER_BACKEND_REPO USER_BACKEND_TAG <<< "$(split_repo_tag "$USER_BACKEND_IMAGE")"
+    - IFS='|' read -r USER_FRONTEND_REPO USER_FRONTEND_TAG <<< "$(split_repo_tag "$USER_FRONTEND_IMAGE")"
+    - IFS='|' read -r ADMIN_BACKEND_REPO ADMIN_BACKEND_TAG <<< "$(split_repo_tag "$ADMIN_BACKEND_IMAGE")"
+    - IFS='|' read -r ADMIN_FRONTEND_REPO ADMIN_FRONTEND_TAG <<< "$(split_repo_tag "$ADMIN_FRONTEND_IMAGE")"
+
     - |
-      if [ -n "$BACKEND_IMAGE" ]; then
-        BACKEND_REPO="$(echo $BACKEND_IMAGE | sed 's/:.*//')"
-        BACKEND_TAG="$(echo $BACKEND_IMAGE | sed 's/^[^:]*://')"
-      else
-        BACKEND_REPO="${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/user-backend"
-        BACKEND_TAG="${IMAGE_TAG}"
+      if [ -n "$CHUNK_IMAGE" ]; then
+        IFS='|' read -r CHUNK_REPO CHUNK_TAG <<< "$(split_repo_tag "$CHUNK_IMAGE")"
       fi
 
-      if [ -n "$FRONTEND_IMAGE" ]; then
-        FRONT_REPO="$(echo $FRONTEND_IMAGE | sed 's/:.*//')"
-        FRONT_TAG="$(echo $FRONTEND_IMAGE | sed 's/^[^:]*://')"
-      else
-        FRONT_REPO="${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/user-frontend"
-        FRONT_TAG="${IMAGE_TAG_FRONTEND:-${IMAGE_TAG}}"
+    - echo "Resolved images:"
+    - echo " USER_BACKEND   = $USER_BACKEND_REPO:$USER_BACKEND_TAG"
+    - echo " USER_FRONTEND  = $USER_FRONTEND_REPO:$USER_FRONTEND_TAG"
+    - echo " ADMIN_BACKEND  = $ADMIN_BACKEND_REPO:$ADMIN_BACKEND_TAG"
+    - echo " ADMIN_FRONTEND = $ADMIN_FRONTEND_REPO:$ADMIN_FRONTEND_TAG"
+    - |
+      if [ -n "$CHUNK_IMAGE" ]; then
+        echo " CHUNK_IMAGE = $CHUNK_REPO:$CHUNK_TAG"
       fi
 
-      echo "Backend image: ${BACKEND_REPO}:${BACKEND_TAG}"
-      echo "Frontend image: ${FRONT_REPO}:${FRONT_TAG}"
-
-    # deploy user backend
+    # -------------------------
+    # DEPLOY USER BACKEND
+    # -------------------------
+    - echo "=== Deploying USER Backend ==="
     - |
-      helm upgrade --install esmael-user-backend ./charts/user-backend \
-        --namespace "$NAMESPACE_USER" --create-namespace \
-        --wait --timeout "$HELM_TIMEOUT" \
-        --set image.repository="${BACKEND_REPO}" \
-        --set image.tag="${BACKEND_TAG}" \
-        --set env.EMBEDDING_ENDPOINT="${EMBEDDING_ENDPOINT}" \
-        --set env.CHUNK_URL="${CHUNK_URL}" \
-        --set env.VECTOR_DB_ENDPOINT="${VECTOR_DB_ENDPOINT}" \
-        --set env.VECTOR_DB_ENDPOINT_UPSERT="${VECTOR_DB_ENDPOINT_UPSERT}" \
-        --set env.DEPLOYED_INDEX_ID="${DEPLOYED_INDEX_ID}" \
-        --set env.PROJECT_ID="${PROJECT_ID}" \
-        --set env.REGION="${REGION}" \
-        --set env.MEMORY_STORE_HOST="${MEMORY_STORE_HOST:-redis}" \
-        --set env.MEMORY_STORE_PORT="${MEMORY_STORE_PORT:-6379}" \
-        --set env.LLM_ENDPOINT="${LLM_ENDPOINT}" \
-        --set env.LLM_MODEL_ID="${LLM_MODEL_ID}" \
-        --set gcpServiceAccount.secretName="service-account.json" \
-        --set gcpServiceAccount.mountPath="/app/keys" \
-        --set gcpServiceAccount.fileName="service-account.json"
-
-    # deploy user frontend
-    - |
-      helm upgrade --install esmael-user-frontend ./charts/user-frontend \
+      helm upgrade --install esmael-user-backend ./helm/user_backend \
         --namespace "$NAMESPACE_USER" \
+        --create-namespace \
         --wait --timeout "$HELM_TIMEOUT" \
-        --set image.repository="${FRONT_REPO}" \
-        --set image.tag="${FRONT_TAG}" \
-        --set env.VITE_API_URL="/api" \
-        --set env.ADMIN_CLOUD_RUN_URL="${ADMIN_CLOUD_RUN_URL:-}"
+        --set image.repository="$USER_BACKEND_REPO" \
+        --set image.tag="$USER_BACKEND_TAG" \
+        --set env.EMBEDDING_ENDPOINT="$EMBEDDING_ENDPOINT" \
+        --set env.CHUNK_URL="$CHUNK_URL" \
+        --set env.VECTOR_DB_ENDPOINT="$VECTOR_DB_ENDPOINT" \
+        --set env.VECTOR_DB_ENDPOINT_UPSERT="$VECTOR_DB_ENDPOINT_UPSERT" \
+        --set env.DEPLOYED_INDEX_ID="$DEPLOYED_INDEX_ID" \
+        --set env.PROJECT_ID="$PROJECT_ID" \
+        --set env.REGION="$REGION" \
+        --set env.MEMORY_STORE_HOST="${MEMORY_STORE_HOST:-redis}" \
+        --set env.MEMORY_STORE_PORT="${MEMORY_STORE_PORT:-6379}" \
+        --set env.LLM_ENDPOINT="$LLM_ENDPOINT" \
+        --set env.LLM_MODEL_ID="$LLM_MODEL_ID" \
+        --set gcpServiceAccount.secretName="service-account.json" \
+        --set gcpServiceAccount.mountPath="/app/keys" \
+        --set gcpServiceAccount.fileName="service-account.json"
 
-    # deploy admin backend
+
+
+    # -------------------------
+    # DEPLOY USER FRONTEND
+    # -------------------------
+    - echo "=== Deploying USER Frontend ==="
     - |
-      helm upgrade --install admin-backend ./charts/admin-backend \
-        --namespace "$NAMESPACE_ADMIN" --create-namespace \
+      helm upgrade --install esmael-user-frontend ./helm/user_frontend \
+        --namespace "$NAMESPACE_USER" \
+        --create-namespace \
         --wait --timeout "$HELM_TIMEOUT" \
-        --set image.repository="${IMAGE_REPO:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}}/admin-backend" \
-        --set image.tag="${IMAGE_TAG}" \
+        --set image.repository="$USER_FRONTEND_REPO" \
+        --set image.tag="$USER_FRONTEND_TAG" \
+        --set env.VITE_API_URL="/api" 
+
+
+
+    # -------------------------
+    # DEPLOY ADMIN BACKEND
+    # -------------------------
+    - echo "=== Deploying ADMIN Backend ==="
+    - |
+      helm upgrade --install esmael-admin-backend ./helm/admin_backend \
+        --namespace "$NAMESPACE_ADMIN" \
+        --create-namespace \
+        --wait --timeout "$HELM_TIMEOUT" \
+        --set image.repository="$ADMIN_BACKEND_REPO" \
+        --set image.tag="$ADMIN_BACKEND_TAG" \
         --set env.CHUNK_URL="${CHUNK_URL}" \
         --set env.EMBEDDING_ENDPOINT="${EMBEDDING_ENDPOINT}" \
         --set env.VECTOR_DB_ENDPOINT="${VECTOR_DB_ENDPOINT}" \
@@ -133,17 +179,29 @@ deploy_to_osd:
         --set gcpServiceAccount.mountPath="/app/keys" \
         --set gcpServiceAccount.fileName="service-account.json"
 
-    # deploy admin frontend
+
+
+    # -------------------------
+    # DEPLOY ADMIN FRONTEND
+    # -------------------------
+    - echo "=== Deploying ADMIN Frontend ==="
     - |
-      helm upgrade --install admin-frontend ./charts/admin-frontend \
+      helm upgrade --install esmael-admin-frontend ./helm/admin_frontend \
         --namespace "$NAMESPACE_ADMIN" \
+        --create-namespace \
         --wait --timeout "$HELM_TIMEOUT" \
-        --set image.repository="${IMAGE_REPO:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}}/admin-frontend" \
-        --set image.tag="${IMAGE_TAG_FRONTEND:-${IMAGE_TAG}}" \
-        --set env.VITE_API_URL="/api" \
-        --set env.ADMIN_CLOUD_RUN_URL="/api"
+        --set image.repository="$ADMIN_FRONTEND_REPO" \
+        --set image.tag="$ADMIN_FRONTEND_TAG" \
+        --set env.VITE_API_URL="/api" 
+
 
   environment:
     name: osd/sandbox
+
   rules:
-    - when: always
+    # run automatically only on the main branch
+    - if: '$CI_COMMIT_REF_NAME == "main"'
+      when: always
+
+    # otherwise never run this job
+    - when: never

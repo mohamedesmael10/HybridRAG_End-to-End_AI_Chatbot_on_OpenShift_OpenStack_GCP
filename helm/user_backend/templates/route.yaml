@@ -1,0 +1,24 @@
+
+{{- if .Values.route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "user-backend.fullname" . }}
+  annotations: {{ toYaml .Values.route.annotations | nindent 4 }}
+spec:
+  to:
+    kind: Service
+    name: {{ include "user-backend.fullname" . }}
+    weight: 100
+  port:
+    targetPort: {{ .Values.service.targetPort }}
+  tls:
+  {{- if .Values.route.tls.enabled }}
+    termination: {{ .Values.route.tls.termination | default "edge" }}
+    insecureEdgeTerminationPolicy: {{ .Values.route.tls.insecureEdgeTerminationPolicy | default "Redirect" }}
+  {{- else }}
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  {{- end }}
+  host: {{ .Values.route.host | default "" }}
+{{- end }}

@@ -24,15 +24,15 @@ env:
   ADMIN_CLOUD_RUN_URL: ""     # runtime: used to patch index.html inside container (optional)
 
 # ingress configuration
-# ingress:
-#   enabled: false
-#   className: ""
-#   annotations: {}
-#   hosts:
-#     - host: frontend.example.com
-#       paths:
-#         - /
-#   tls: []
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: frontend.example.com
+      paths:
+        - /
+  tls: []
 
 route:
   enabled: false
@@ -51,8 +51,16 @@ autoscaling:
   maxReplicas: 3
   targetCPUUtilizationPercentage: 70
 
-# liveness/readiness
+backend:
+  serviceName: esmael-user-backend-user-backend
+  port: 8080
+
 probe:
+  # probe.path controls both readiness and liveness path by default
+  path: "/"                    # change to "/health" if your app exposes /health
   initialDelaySeconds: 5
   periodSeconds: 10
   timeoutSeconds: 3
+  # separate liveness timings (optional)
+  livenessInitialDelaySeconds: 30
+  livenessPeriodSeconds: 20

@@ -32,7 +32,7 @@ env:
   REGION: ""
 
   # static — remains constant
-  LLM_MODEL_I: "gemini-2.5-flash"
+  LLM_MODEL_ID: "gemini-2.5-flash"
   LLM_ENDPOINT: "https://us-central1-aiplatform.googleapis.com/v1/projects/rock-task-468906-n1/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent"
   LLM_TEMPERATURE: "0.2"
   LLM_MAX_OUTPUT_TOKENS: "1024"
@@ -50,16 +50,16 @@ probe:
   periodSeconds: 15
   timeoutSeconds: 5
 
-# Optional ingress (set enabled: true and configure host)
-# ingress:
-#   enabled: false
-#   className: ""
-#   annotations: {}
-#   hosts:
-#     - host: user-backend.example.com
-#       paths:
-#         - /
-#   tls: []
+#Optional ingress (set enabled: true and configure host)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: user-backend.example.com
+      paths:
+        - /
+  tls: []
 
 route:
   enabled: false
@@ -78,3 +78,7 @@ autoscaling:
   maxReplicas: 5
   targetCPUUtilizationPercentage: 70
 
+
+secrets:
+  memoryStoreSecretName: ""          
+  memoryStorePasswordKey: "REDIS_PASSWORD"

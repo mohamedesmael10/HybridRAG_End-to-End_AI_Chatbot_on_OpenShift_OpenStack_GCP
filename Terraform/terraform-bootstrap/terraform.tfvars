@@ -5,5 +5,5 @@ cloudbuild_branch   = "main"
 git_repo_owner      = "mohamedesmael10"
 git_repo_name       = "HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP"
 
-gitlab_project_id   = "12345678"  
+gitlab_project_id   = "75520343"  
 

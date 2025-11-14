@@ -1,3 +1,5 @@
+
+
 replicaCount: 1
 
 image:
@@ -36,16 +38,16 @@ probe:
   periodSeconds: 15
   timeoutSeconds: 5
 
-# # Optional ingress
-# ingress:
-#   enabled: false
-#   className: ""
-#   annotations: {}
-#   hosts:
-#     - host: pubsub-backend.example.com
-#       paths:
-#         - /
-#   tls: []
+# Optional ingress
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: pubsub-backend.example.com
+      paths:
+        - /
+  tls: []
 
 route:
   enabled: false
