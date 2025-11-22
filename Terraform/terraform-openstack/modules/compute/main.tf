@@ -6,8 +6,8 @@ resource "openstack_compute_instance_v2" "vm" {
   flavor_name = var.flavor
   key_pair   = var.key_name
 
-  network {
-    name = var.network
+   network {
+    uuid = var.network
   }
 
   user_data = var.user_data
@@ -16,4 +16,5 @@ resource "openstack_compute_instance_v2" "vm" {
   lifecycle {
     create_before_destroy = true
   }
+
 }

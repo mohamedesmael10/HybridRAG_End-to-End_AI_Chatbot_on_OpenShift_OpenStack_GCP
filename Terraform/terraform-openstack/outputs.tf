@@ -12,3 +12,7 @@ output "keypair_name" {
   description = "Name of the keypair created/used"
   value       = module.keypair.name
 }
+
+output "kubeconfig" {
+  value     = local_file.kubeconfig.filename
+}

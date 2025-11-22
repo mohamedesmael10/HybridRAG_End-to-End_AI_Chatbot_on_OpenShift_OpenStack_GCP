@@ -1,0 +1,19 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+runcmd:
+  - snap install microk8s --classic
+  - microk8s status --wait-ready
+  - microk8s enable dns storage ingress registry
+  - snap install helm --classic
+  - usermod -aG microk8s ubuntu
+  - mkdir -p /home/ubuntu/.kube
+  - microk8s config > /root/kubeconfig
+  - |
+      CONFIG_B64=$(base64 -w0 /root/kubeconfig)
+      curl -s \
+        --header "X-Vault-Token: ${VAULT_TOKEN}" \
+        --request POST \
+        --data "{\"config\": \"${CONFIG_B64}\"}" \
+        ${VAULT_ADDR}/v1/kv/k8s-config

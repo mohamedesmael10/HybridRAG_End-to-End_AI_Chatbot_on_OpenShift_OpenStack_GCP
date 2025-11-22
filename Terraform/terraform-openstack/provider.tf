@@ -18,11 +18,7 @@
 #}
 
 # Vault provider — configure via variables or environment variables.
-provider "vault" {
-  address = var.vault_addr     # e.g. https://vault.example:8200 or http://127.0.0.1:8200
-  token   = var.vault_token    # sensitive; prefer passing via env or CI variable
-  # skip_tls_verify = true    # uncomment only for testing with self-signed certs
-}
+
 
 
 # Read the microstack secret stored under KV v2 at "secret/microstack"
@@ -46,8 +42,21 @@ provider "vault" {
 
 # provider "openstack" {}
 
+  
+resource "vault_policy" "ci_cd_policy" {
+  name   = "ci-cd-policy"
+  policy = file("${path.module}/policy.hcl")
+}
+
+
+provider "vault" {
+  address       = var.vault_addr
+ # token         = var.vault_token
+  skip_tls_verify = true
+}
+
 data "vault_generic_secret" "microstack" {
-  path = "secret/microstack"
+  path = "kv/microstack"
 }
 
 provider "openstack" {
@@ -58,5 +67,5 @@ provider "openstack" {
   auth_url         = data.vault_generic_secret.microstack.data["OS_AUTH_URL"]
   region           = var.region
   # cert = var.cacert
-  insecure = true
+  insecure         = true
 }
