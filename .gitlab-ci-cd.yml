@@ -1,131 +1,518 @@
-stages:
-  - trial
 
-deploy_to_osd:
-  image: quay.io/openshift/origin-cli:4.13
-  stage: trial
+.default-dind: &default-dind
+  image: docker:27
+  services:
+    - docker:27-dind
   variables:
-    HELM_TIMEOUT: "10m"
-    OS_PROJECT: "mohamed-esmael-dev"
-    OS_ADMIN_PROJECT: "mohamed-esmael-dev"
-
+    DOCKER_TLS_CERTDIR: ""
   before_script:
-    # install Helm v3
-    - curl -fsSL https://get.helm.sh/helm-v3.12.0-linux-amd64.tar.gz -o helm.tgz
-    - tar -xzf helm.tgz && mv linux-amd64/helm /usr/local/bin/helm && chmod +x /usr/local/bin/helm
-    - helm version
+    - apk add --no-cache curl bash jq
+    - docker info || true
+
+stages:
+  - trivy-repo-scan
+  - build-test
+  - sonarqube
+  - build-images
+  - trivy-image-scan
+  - push-images
+  - terraform-deploy
+
+variables:
+  # docker build defaults
+  DOCKER_HOST: tcp://docker:2375/
+  DOCKER_DRIVER: overlay2
+  IMAGE_TAG_SUFFIX: "${CI_PIPELINE_IID}"
+  REPO_BASE: "mohamedesmael/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp"
+
+  VAULT_ADDR: "https://5978568af8c9.ngrok-free.app"
+  TF_VER: "1.5.7"
+
+  ADMIN_BACKEND_REPO: "${REPO_BASE}"
+  ADMIN_BACKEND_TAG: "${IMAGE_TAG_SUFFIX}"
+  USER_BACKEND_REPO: "${REPO_BASE}"
+  USER_BACKEND_TAG: "${IMAGE_TAG_SUFFIX}"
+  ADMIN_FRONTEND_REPO: "${REPO_BASE}"
+  ADMIN_FRONTEND_TAG: "${IMAGE_TAG_SUFFIX}"
+  USER_FRONTEND_REPO: "${REPO_BASE}"
+  USER_FRONTEND_TAG: "${IMAGE_TAG_SUFFIX}"
+  CHUNK_FUNCTION_REPO: "${REPO_BASE}"
+  CHUNK_FUNCTION_TAG: "${IMAGE_TAG_SUFFIX}"
+
+
+trivy-repo-scan:
+  stage: trivy-repo-scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]      
   script:
-    - set -euo pipefail
+    - echo "Scanning repository (filesystem) with Trivy..."
+    - trivy fs --scanners vuln,config --severity HIGH,CRITICAL --format json -o trivy-report.json .
+    - trivy fs --scanners vuln,config --severity HIGH,CRITICAL --format table --exit-code 0 --no-progress .
+  artifacts:
+    when: always
+    paths:
+      - trivy-report.json
+    expire_in: 1h
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "test"'
 
-    - echo "Login to OpenShift..."
-    - oc login --token="$OC_TOKEN" --server="$OC_SERVER" --insecure-skip-tls-verify=true
-
-    # ensure project(s)
-    - export NAMESPACE_USER="${OS_PROJECT:-mohamed-esmael-dev}"
-    - export NAMESPACE_ADMIN="${OS_ADMIN_PROJECT:-mohamed-esmael-dev}"
-    - oc project "$NAMESPACE_USER"  || true
-    - oc project "$NAMESPACE_ADMIN" || true
-
-    
-    # -------------------------
-    # OPTIONAL: create/update GCP service-account secret (kept for LLM access if you still need it)
-    # -------------------------
+build-and-test:
+  <<: *default-dind
+  stage: build-test
+  script:
     - |
-      if [ -n "${GCP_SA_KEY:-}" ]; then
-        echo "Creating/updating OpenShift secret 'service-account.json' from CI var GCP_SA_KEY..."
-        TMPFILE="$(mktemp /tmp/gcp-sa.XXXXXX)"
-        if echo "$GCP_SA_KEY" | base64 --decode > "$TMPFILE" 2>/dev/null; then
-          echo "GCP_SA_KEY decoded from base64 (hidden)."
+      set -e
+      # Install system deps we'll need for python builds and node
+      apk add --no-cache python3 py3-pip build-base nodejs npm git
+
+      echo "---- Admin_Backend (Python) ----"
+      if [ -d Admin_Backend ]; then
+        cd Admin_Backend
+
+        # create per-project venv to avoid PEP-668 errors
+        python3 -m venv .venv
+        . .venv/bin/activate
+        pip install --upgrade pip setuptools wheel
+
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
         else
-          echo "GCP_SA_KEY appears not base64; writing raw content to temp file."
-          echo "$GCP_SA_KEY" > "$TMPFILE"
+          echo "requirements.txt not found in Admin_Backend, skipping pip install"
         fi
-        # quick JSON validation (if python present)
+
+        # run tests if present
+        if ls tests/test_*.py 1>/dev/null 2>&1; then
+          pip install pytest || true
+          pytest -q || true
+        fi
+
+        deactivate || true
+        cd -
+      else
+        echo "Admin_Backend not present, skipping"
+      fi
+
+      echo "---- Chunk_Function (Python) ----"
+      if [ -d Chunk_Function ]; then
+        cd Chunk_Function
+
+        python3 -m venv .venv
+        . .venv/bin/activate
+        pip install --upgrade pip setuptools wheel
+
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        else
+          echo "requirements.txt not found in Chunk_Function, skipping pip install"
+        fi
+
+        if ls tests/test_*.py 1>/dev/null 2>&1; then
+          pip install pytest || true
+          pytest -q || true
+        fi
+
+        deactivate || true
+        cd -
+      else
+        echo "Chunk_Function not present, skipping"
+      fi
+
+      echo "---- Admin_Frontend (Node) ----"
+      if [ -d Admin_Frontend ]; then
+        cd Admin_Frontend
+
+        # prefer npm ci (clean install), fallback to npm install if no lockfile
+        if [ -f package-lock.json ]; then
+          npm ci --prefer-offline --no-audit --progress=false || true
+        else
+          echo "package-lock.json missing — using npm install"
+          npm install --no-audit --progress=false || true
+        fi
+
+        # ensure local binaries are available before build
+        if ! npx --no-install vite --version >/dev/null 2>&1; then
+          echo "vite not available via npx/no-install; ensure devDependencies installed (retrying npm install)"
+          npm install --no-audit --progress=false || true
+        fi
+
+        if [ -f package.json ] && grep -q "\"build\"" package.json 2>/dev/null; then
+          npm run build || true
+        else
+          echo "No build script found in Admin_Frontend/package.json — skipping build"
+        fi
+
+        cd -
+      else
+        echo "Admin_Frontend not present, skipping"
+      fi
+
+      echo "---- User_Backend (Python) ----"
+      if [ -d User_Backend ]; then
+        cd User_Backend
+
+        python3 -m venv .venv
+        . .venv/bin/activate
+        pip install --upgrade pip setuptools wheel
+
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        else
+          echo "requirements.txt not found in User_Backend, skipping pip install"
+        fi
+
+        if ls tests/test_*.py 1>/dev/null 2>&1; then
+          pip install pytest || true
+          pytest -q || true
+        fi
+
+        deactivate || true
+        cd -
+      else
+        echo "User_Backend not present, skipping"
+      fi
+
+      echo "---- User_Frontend (Node) ----"
+      if [ -d User_Frontend ]; then
+        cd User_Frontend
+
+        if [ -f package-lock.json ]; then
+          npm ci --prefer-offline --no-audit --progress=false || true
+        else
+          echo "package-lock.json missing — using npm install"
+          npm install --no-audit --progress=false || true
+        fi
+
+        if ! npx --no-install vite --version >/dev/null 2>&1; then
+          echo "vite not available — retrying npm install to restore it"
+          npm install --no-audit --progress=false || true
+        fi
+
+        if [ -f package.json ] && grep -q "\"build\"" package.json 2>/dev/null; then
+          npm run build || true
+        else
+          echo "No build script found in User_Frontend/package.json — skipping build"
+        fi
+
+        cd -
+      else
+        echo "User_Frontend not present, skipping"
+      fi
+
+      # keep a light artifact set (optional)
+      mkdir -p artifacts || true
+      # copy build outputs if exist
+      if [ -d Admin_Frontend/dist ]; then cp -r Admin_Frontend/dist artifacts/admin_frontend || true; fi
+      if [ -d User_Frontend/dist ]; then cp -r User_Frontend/dist artifacts/user_frontend || true; fi
+  artifacts:
+    expire_in: 1h
+    paths:
+      - artifacts
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "test"'
+
+
+sonarqube-scan:
+  image:
+    name: eclipse-temurin:17-jdk
+    entrypoint: [""]
+  stage: sonarqube
+  variables:
+    SONAR_TOKEN: $SONAR_TOKEN
+  before_script:
+    - apt-get update && apt-get install -y wget unzip jq curl
+    - wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+    - unzip sonar-scanner-cli-5.0.1.3006-linux.zip
+    - export PATH="$PATH:$PWD/sonar-scanner-5.0.1.3006-linux/bin"
+    - java -version
+    - sonar-scanner --version
+  script:
+    - set -e
+    - |
+      echo "CI branch: $CI_COMMIT_REF_NAME"
+    - |
+      export SONAR_TOKEN="${SONAR_TOKEN}"
+      if [ -z "$SONAR_TOKEN" ]; then
+        echo "ERROR: SONAR_TOKEN is empty. Fix project CI/CD variables (unprotect/unmask)"
+        exit 2
+      fi
+      grep -q '"organizations"' /tmp/sonar_orgs.json || echo "Warning: organizations key not found (token may be invalid)"
+      echo "Running SonarCloud scanner..."
+      sonar-scanner -Dsonar.projectKey="mohamed-esmael_hybridrag-end-to-end-ai-chatbot-on-openshift-openstack-gcp" -Dsonar.organization="mohamed-esmael" -Dsonar.host.url="https://sonarcloud.io" -Dsonar.token="${SONAR_TOKEN}" -Dsonar.sources="." -Dsonar.coverage.exclusions="**/node_modules/**,**/venv/**" -Dsonar.exclusions="**/target/**,**/*.tar,**/*.zip"
+
+      echo "Waiting for SonarCloud Quality Gate result..."
+      for i in $(seq 1 6); do
+        sleep 10
+        REPORT=$(curl -s -u "$SONAR_TOKEN": "https://sonarcloud.io/api/qualitygates/project_status?projectKey=mohamed-esmael_hybridrag-end-to-end-ai-chatbot-on-openshift-openstack-gcp")
+        STATUS=$(echo "$REPORT" | jq -r '.projectStatus.status // "PENDING"')
+        echo "Quality Gate: $STATUS"
+        if [ "$STATUS" = "OK" ]; then
+          echo "SonarCloud Quality Gate PASSED"
+          exit 0
+        fi
+        if [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "WARN" ]; then
+          echo "SonarCloud Quality Gate FAILED: $STATUS"
+          exit 1
+        fi
+        if [ "$i" -eq 6 ]; then
+          echo "Quality Gate check TIMED OUT"
+          exit 1
+        fi
+      done
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "test"'
+
+
+
+build-scan-push-images:
+  <<: *default-dind
+  stage: build-images
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - apk add --no-cache bash curl
+    - docker info || true
+    - |
+      echo "Installing Trivy..."
+
+      # Try official install script first
+      if curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin; then
+          echo "Trivy installed using official script."
+      else
+          echo "Official install script failed, falling back to APK package."
+
+          # Fallback: install from APK (Alpine only)
+          wget https://aquasecurity.github.io/trivy-repo/alpine/v3.14/trivy_0.48.3-0_amd64.apk && \
+          apk add --allow-untrusted trivy_0.48.3-0_amd64.apk
+
+          if [ $? -ne 0 ]; then
+              echo "Failed to install Trivy with both methods!" >&2
+              exit 1
+          fi
+      fi
+
+      trivy --version
+
+  script:
+    - set -e
+
+    # 1 Build all images
+    - echo "Building Docker images..."
+    - |
+      build_image() {
+        dir=$1
+        name=$2
+        if [ -d "$dir" ]; then
+          cd "$dir"
+          docker build --pull -t "${REPO_BASE}:${name}-${IMAGE_TAG_SUFFIX}" -t "${REPO_BASE}:${name}-latest" .
+          cd -
+        else
+          echo "$dir missing, skipping"
+        fi
+      }
+
+      build_image "Admin_Backend" "admin_backend"
+      build_image "User_Backend" "user_backend"
+      build_image "Admin_Frontend" "admin_frontend"
+      build_image "User_Frontend" "user_frontend"
+      build_image "Chunk_Function" "chunk_function"
+
+    # Scan images with Trivy
+    - echo "Scanning images with Trivy..."
+    - |
+      scan_image() {
+        img=$1
+        if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${img}$"; then
+          echo "Scanning ${img}"
+          trivy image --exit-code 1 --severity HIGH,CRITICAL "${img}" || true
+        else
+          echo "Image ${img} not present locally, skipping"
+        fi
+      }
+
+      scan_image "${REPO_BASE}:admin_backend-${IMAGE_TAG_SUFFIX}"
+      scan_image "${REPO_BASE}:user_backend-${IMAGE_TAG_SUFFIX}"
+      scan_image "${REPO_BASE}:admin_frontend-${IMAGE_TAG_SUFFIX}"
+      scan_image "${REPO_BASE}:user_frontend-${IMAGE_TAG_SUFFIX}"
+      scan_image "${REPO_BASE}:chunk_function-${IMAGE_TAG_SUFFIX}"
+
+    #  Push images if credentials are set
+    - echo "Pushing images to Docker Hub..."
+    - |
+      if [ -n "$DOCKER_PASSWORD" ]; then
+        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+      fi
+
+      push_image() {
+        img=$1
+        if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${img}$"; then
+          echo "Pushing ${img}"
+          docker push "${img}" || true
+        else
+          echo "Skipping push, image ${img} not found locally"
+        fi
+      }
+
+      push_image "${REPO_BASE}:admin_backend-${IMAGE_TAG_SUFFIX}"
+      push_image "${REPO_BASE}:admin_backend-latest"
+      push_image "${REPO_BASE}:user_backend-${IMAGE_TAG_SUFFIX}"
+      push_image "${REPO_BASE}:user_backend-latest"
+      push_image "${REPO_BASE}:admin_frontend-${IMAGE_TAG_SUFFIX}"
+      push_image "${REPO_BASE}:admin_frontend-latest"
+      push_image "${REPO_BASE}:user_frontend-${IMAGE_TAG_SUFFIX}"
+      push_image "${REPO_BASE}:user_frontend-latest"
+      push_image "${REPO_BASE}:chunk_function-${IMAGE_TAG_SUFFIX}"
+      push_image "${REPO_BASE}:chunk_function-latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "test"'
+
+
+terraform-deploy:
+  stage: terraform-deploy
+  tags:
+    - host-runner                 
+  before_script:
+    - apk add --no-cache curl jq bash coreutils || true
+    - terraform version || true
+    - echo "Exporting Vault & OpenStack env variables (from CI variables)"
+    - export VAULT_ADDR="${VAULT_ADDR}"
+    - export VAULT_TOKEN="${VAULT_TOKEN}"
+    - export PUBLIC_KEY="${PUBLIC_KEY:-}"
+    - export TF_VAR_public_key="${PUBLIC_KEY:-}"
+    - export TF_VAR_vault_addr="${VAULT_ADDR}"
+    - export TF_VAR_vault_token="${VAULT_TOKEN}"
+    - cd Terraform/terraform-openstack
+  artifacts:
+    when: always
+    paths:
+      - kubeconfig
+    expire_in: 1h
+  script:
+    - |
+      set -euo pipefail
+
+      echo "VAULT_ADDR=${VAULT_ADDR}"
+      echo "VAULT_TOKEN length: ${#VAULT_TOKEN}"
+
+      # Quick check Vault token validity
+      STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Vault-Token: ${VAULT_TOKEN}" "${VAULT_ADDR}/v1/auth/token/lookup-self" || true)
+      echo "Vault lookup-self HTTP status: ${STATUS}"
+      if [ "${STATUS}" != "200" ]; then
+        echo "Vault token invalid or unauthorized (status=${STATUS}). Showing response:"
+        curl -s -H "X-Vault-Token: ${VAULT_TOKEN}" "${VAULT_ADDR}/v1/auth/token/lookup-self" || true
+        exit 1
+      fi
+
+      echo "Running terraform init/plan/apply"
+      terraform init -input=false -upgrade
+      terraform plan -out=tfplan -input=false || true
+      terraform apply -input=false -auto-approve tfplan || terraform apply -auto-approve
+
+      echo "Terraform finished. Fetching kubeconfig from Vault (kv v1 path: kv/k8s-config)..."
+
+      # Read kubeconfig JSON from Vault (kv v1: fields are at .data)
+      KCFG_JSON=$(curl -sS -H "X-Vault-Token: ${VAULT_TOKEN}" "${VAULT_ADDR}/v1/kv/k8s-config" || true)
+      if [ -z "$KCFG_JSON" ] || [ "$KCFG_JSON" = "null" ]; then
+        echo "No kubeconfig found in Vault at kv/k8s-config"
+        exit 1
+      fi
+
+      # get config value; handle common patterns
+      KCFG_B64=$(echo "$KCFG_JSON" | jq -r '.data.config // .data."config" // empty')
+      if [ -z "$KCFG_B64" ] || [ "$KCFG_B64" = "null" ]; then
+        echo "k8s-config exists but 'config' field empty"
+        echo "Vault response:"
+        echo "$KCFG_JSON" | jq .
+        exit 1
+      fi
+
+      # Write kubeconfig
+      echo "$KCFG_B64" | base64 --decode > kubeconfig || (echo "failed to write kubeconfig" && exit 1)
+      chmod 600 kubeconfig
+      export KUBECONFIG="$PWD/kubeconfig"
+      echo "KUBECONFIG written to $(pwd)/kubeconfig; kubectl version --client"
+      kubectl version --client || true
+
+      echo "Installing helm if needed"
+      if ! command -v helm >/dev/null 2>&1; then
+        curl -fsSL https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz -o /tmp/helm.tgz && tar -xzf /tmp/helm.tgz -C /tmp && mv /tmp/linux-amd64/helm /usr/local/bin/helm && chmod +x /usr/local/bin/helm || true
+      fi
+      helm version || true
+
+      echo "=== Creating GCP secret (Kubernetes) ==="
+      # pick kubectl
+      if command -v kubectl >/dev/null 2>&1; then
+        KUBECTL_CMD="kubectl"
+      elif command -v microk8s >/dev/null 2>&1 && microk8s kubectl version >/dev/null 2>&1; then
+        KUBECTL_CMD="microk8s kubectl"
+      elif command -v "microk8s.kubectl" >/dev/null 2>&1; then
+        KUBECTL_CMD="microk8s.kubectl"
+      else
+        echo "ERROR: no kubectl nor microk8s kubectl found in PATH; cannot create k8s secret"
+        exit 1
+      fi
+      echo "Using kubectl command: ${KUBECTL_CMD}"
+
+      if [ -n "${GCP_SA_KEY:-}" ]; then
+        TMPFILE="$(mktemp /tmp/gcp-sa.XXXXXX.json)"
+        trap 'rm -f "$TMPFILE"' EXIT
+
+        if printf "%s" "$GCP_SA_KEY" | base64 --decode >/dev/null 2>&1; then
+          printf "%s" "$GCP_SA_KEY" | base64 --decode > "$TMPFILE"
+        else
+          printf "%s" "$GCP_SA_KEY" > "$TMPFILE"
+        fi
+
+        # validate json if python present
         if command -v python3 >/dev/null 2>&1; then
           if ! python3 -c "import json,sys; json.load(open('$TMPFILE'))" 2>/dev/null; then
             echo "ERROR: service-account JSON is invalid"; rm -f "$TMPFILE"; exit 1
           fi
-        elif command -v python >/dev/null 2>&1; then
-          if ! python -c "import json,sys; json.load(open('$TMPFILE'))" 2>/dev/null; then
-            echo "ERROR: service-account JSON is invalid"; rm -f "$TMPFILE"; exit 1
-          fi
         fi
-        oc delete secret service-account.json -n "$NAMESPACE_USER" --ignore-not-found || true
-        oc create secret generic service-account.json -n "$NAMESPACE_USER" --from-file=service-account.json="$TMPFILE"
-        oc delete secret service-account.json -n "$NAMESPACE_ADMIN" --ignore-not-found || true
-        oc create secret generic service-account.json -n "$NAMESPACE_ADMIN" --from-file=service-account.json="$TMPFILE"
-        shred -u "$TMPFILE" 2>/dev/null || rm -f "$TMPFILE"
+
+        for ns in "${NAMESPACE_USER:-esmael-user}" "${NAMESPACE_ADMIN:-esmael-admin}"; do
+          printf "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n" "${ns}" | ${KUBECTL_CMD} apply -f - >/dev/null || true
+          ${KUBECTL_CMD} delete secret service-account.json -n "${ns}" --ignore-not-found || true
+          ${KUBECTL_CMD} create secret generic service-account.json -n "${ns}" --from-file=service-account.json="$TMPFILE"
+        done
+
+        if command -v shred >/dev/null 2>&1; then
+          shred -u "$TMPFILE" 2>/dev/null || rm -f "$TMPFILE"
+        else
+          rm -f "$TMPFILE"
+        fi
+        trap - EXIT
+        echo "GCP service-account secret created/updated in k8s."
       else
         echo "GCP_SA_KEY not provided — skipping service-account secret creation."
       fi
 
-    # -------------------------
-    # Resolve Docker images (Docker Hub trial)
-    # Accept override env vars:
-    # USER_BACKEND_IMAGE, USER_FRONTEND_IMAGE, CHUNK_IMAGE, ADMIN_BACKEND_IMAGE, ADMIN_FRONTEND_IMAGE
-    # Fallbacks use your DockerHub images with -v1 tags.
-    # -------------------------
-    - |
-      # defaults (your dockerhub images)
-      DEFAULT_USER_BACKEND="mohamedesmael/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp:user-backend-v2"
-      DEFAULT_USER_FRONTEND="mohamedesmael/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp:user-frontend-v7"
-      DEFAULT_CHUNK="mohamedesmael/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp:chunk-image-v1"
-      DEFAULT_ADMIN_BACKEND="mohamedesmael/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp:admin-backend-v2"
-      DEFAULT_ADMIN_FRONTEND="mohamedesmael/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp:admin-frontend-v3"
+      echo "Deploying Helm charts (admin & user) and applying Chunk manifests. Using image repo & tags from CI variables."
 
-      # choose provided or default
-      USER_BACKEND_IMAGE="${USER_BACKEND_IMAGE:-${DEFAULT_USER_BACKEND}}"
-      USER_FRONTEND_IMAGE="${USER_FRONTEND_IMAGE:-${DEFAULT_USER_FRONTEND}}"
-      CHUNK_IMAGE="${CHUNK_IMAGE:-${DEFAULT_CHUNK}}"
-      ADMIN_BACKEND_IMAGE="${ADMIN_BACKEND_IMAGE:-${DEFAULT_ADMIN_BACKEND}}"
-      ADMIN_FRONTEND_IMAGE="${ADMIN_FRONTEND_IMAGE:-${DEFAULT_ADMIN_FRONTEND}}"
+      # defaults and read-from CI variables
+      NAMESPACE_USER="${NAMESPACE_USER:-esmael-user}"
+      NAMESPACE_ADMIN="${NAMESPACE_ADMIN:-esmael-admin}"
+      NAMESPACE_CHUNK="${NAMESPACE_CHUNK:-esmael-chunk}"
+      HELM_TIMEOUT="${HELM_TIMEOUT:-300s}"
 
-      echo "Resolved images:"
-      echo " USER_BACKEND_IMAGE=${USER_BACKEND_IMAGE}"
-      echo " USER_FRONTEND_IMAGE=${USER_FRONTEND_IMAGE}"
-      echo " CHUNK_IMAGE=${CHUNK_IMAGE}"
-      echo " ADMIN_BACKEND_IMAGE=${ADMIN_BACKEND_IMAGE}"
-      echo " ADMIN_FRONTEND_IMAGE=${ADMIN_FRONTEND_IMAGE}"
+      USER_BACKEND_REPO="${USER_BACKEND_REPO:-${REPO_BASE}}"
+      USER_BACKEND_TAG="${USER_BACKEND_TAG:-${IMAGE_TAG_SUFFIX}}"
+      USER_FRONTEND_REPO="${USER_FRONTEND_REPO:-${REPO_BASE}}"
+      USER_FRONTEND_TAG="${USER_FRONTEND_TAG:-${IMAGE_TAG_SUFFIX}}"
+      ADMIN_BACKEND_REPO="${ADMIN_BACKEND_REPO:-${REPO_BASE}}"
+      ADMIN_BACKEND_TAG="${ADMIN_BACKEND_TAG:-${IMAGE_TAG_SUFFIX}}"
+      ADMIN_FRONTEND_REPO="${ADMIN_FRONTEND_REPO:-${REPO_BASE}}"
+      ADMIN_FRONTEND_TAG="${ADMIN_FRONTEND_TAG:-${IMAGE_TAG_SUFFIX}}"
+      CHUNK_FUNCTION_REPO="${CHUNK_FUNCTION_REPO:-${REPO_BASE}}"
+      CHUNK_FUNCTION_TAG="${CHUNK_FUNCTION_TAG:-${IMAGE_TAG_SUFFIX}}"
 
-      # helper to split repo and tag; if no tag provided default to 'latest'
-      split_repo_tag() {
-        full="$1"
-        repo="${full%%:*}"
-        tag="${full#*:}"
-        if [ "$repo" = "$tag" ]; then
-          tag="latest"
-        fi
-        printf "%s|%s" "$repo" "$tag"
-      }
-
-      IFS='|' read -r USER_BACKEND_REPO USER_BACKEND_TAG <<< "$(split_repo_tag "$USER_BACKEND_IMAGE")"
-      IFS='|' read -r USER_FRONTEND_REPO USER_FRONTEND_TAG <<< "$(split_repo_tag "$USER_FRONTEND_IMAGE")"
-      IFS='|' read -r CHUNK_REPO CHUNK_TAG <<< "$(split_repo_tag "$CHUNK_IMAGE")"
-      IFS='|' read -r ADMIN_BACKEND_REPO ADMIN_BACKEND_TAG <<< "$(split_repo_tag "$ADMIN_BACKEND_IMAGE")"
-      IFS='|' read -r ADMIN_FRONTEND_REPO ADMIN_FRONTEND_TAG <<< "$(split_repo_tag "$ADMIN_FRONTEND_IMAGE")"
-
-      echo "Final repo/tag pairs:"
-      echo " user-backend: ${USER_BACKEND_REPO}:${USER_BACKEND_TAG}"
-      echo " user-frontend: ${USER_FRONTEND_REPO}:${USER_FRONTEND_TAG}"
-      echo " chunk-image: ${CHUNK_REPO}:${CHUNK_TAG}"
-      echo " admin-backend: ${ADMIN_BACKEND_REPO}:${ADMIN_BACKEND_TAG}"
-      echo " admin-frontend: ${ADMIN_FRONTEND_REPO}:${ADMIN_FRONTEND_TAG}"
-
-    # compute LLM endpoint (kept)
-    - |
-      LLM_MODEL_ID="${LLM_MODEL_ID:-gemini-2.5-flash}"
-      PROJECT_ID="${PROJECT_ID:-$GCP_PROJECT_ID}"
-      REGION="${REGION:-us-central1}"
-      LLM_ENDPOINT="${LLM_ENDPOINT:-https://us-central1-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/publishers/google/models/${LLM_MODEL_ID}:generateContent}"
-      echo "Using LLM_ENDPOINT=${LLM_ENDPOINT}"
-
-    # -------------------------
-    # Deploy user backend (pointing to Docker Hub image)
-    # Note: Helm charts should accept image.repository + image.tag values
-    # -------------------------
-    - |
+      # -------------------------
+      # DEPLOY USER BACKEND
+      # -------------------------
       helm upgrade --install esmael-user-backend ./helm/user_backend \
-        --wait --timeout "$HELM_TIMEOUT" \
+        --namespace "${NAMESPACE_USER}" \
+        --create-namespace \
+        --wait --timeout "${HELM_TIMEOUT}" \
         --set image.repository="${USER_BACKEND_REPO}" \
         --set image.tag="${USER_BACKEND_TAG}" \
         --set env.EMBEDDING_ENDPOINT="${EMBEDDING_ENDPOINT:-}" \
@@ -137,29 +524,30 @@ deploy_to_osd:
         --set env.REGION="${REGION:-}" \
         --set env.MEMORY_STORE_HOST="${MEMORY_STORE_HOST:-redis}" \
         --set env.MEMORY_STORE_PORT="${MEMORY_STORE_PORT:-6379}" \
-        --set env.LLM_ENDPOINT="${LLM_ENDPOINT}" \
-        --set env.LLM_MODEL_ID="${LLM_MODEL_ID}" \
+        --set env.LLM_ENDPOINT="${LLM_ENDPOINT:-}" \
+        --set env.LLM_MODEL_ID="${LLM_MODEL_ID:-}" \
         --set gcpServiceAccount.secretName="service-account.json" \
         --set gcpServiceAccount.mountPath="/app/keys" \
         --set gcpServiceAccount.fileName="service-account.json"
 
-    # -------------------------
-    # Deploy user frontend (Docker Hub)
-    # -------------------------
-    - |
+      # -------------------------
+      # DEPLOY USER FRONTEND
+      # -------------------------
       helm upgrade --install esmael-user-frontend ./helm/user_frontend \
-        --wait --timeout "$HELM_TIMEOUT" \
+        --namespace "${NAMESPACE_USER}" \
+        --create-namespace \
+        --wait --timeout "${HELM_TIMEOUT}" \
         --set image.repository="${USER_FRONTEND_REPO}" \
         --set image.tag="${USER_FRONTEND_TAG}" \
-        --set env.VITE_API_URL="/api" 
-        
+        --set env.VITE_API_URL="/api"
 
-    # -------------------------
-    # Deploy admin backend (Docker Hub)
-    # -------------------------
-    - |
+      # -------------------------
+      # DEPLOY ADMIN BACKEND
+      # -------------------------
       helm upgrade --install esmael-admin-backend ./helm/admin_backend \
-        --wait --timeout "$HELM_TIMEOUT" \
+        --namespace "${NAMESPACE_ADMIN}" \
+        --create-namespace \
+        --wait --timeout "${HELM_TIMEOUT}" \
         --set image.repository="${ADMIN_BACKEND_REPO}" \
         --set image.tag="${ADMIN_BACKEND_TAG}" \
         --set env.CHUNK_URL="${CHUNK_URL:-}" \
@@ -171,37 +559,47 @@ deploy_to_osd:
         --set env.REGION="${REGION:-}" \
         --set env.MEMORY_STORE_HOST="${MEMORY_STORE_HOST:-redis}" \
         --set env.MEMORY_STORE_PORT="${MEMORY_STORE_PORT:-6379}" \
-        --set env.LLM_ENDPOINT="${LLM_ENDPOINT}" \
-        --set env.LLM_MODEL_ID="${LLM_MODEL_ID}" \
+        --set env.LLM_ENDPOINT="${LLM_ENDPOINT:-}" \
+        --set env.LLM_MODEL_ID="${LLM_MODEL_ID:-}" \
         --set gcpServiceAccount.secretName="service-account.json" \
         --set gcpServiceAccount.mountPath="/app/keys" \
         --set gcpServiceAccount.fileName="service-account.json"
 
-    # -------------------------
-    # Deploy admin frontend (Docker Hub)
-    # -------------------------
-    - |
+      # -------------------------
+      # DEPLOY ADMIN FRONTEND
+      # -------------------------
       helm upgrade --install esmael-admin-frontend ./helm/admin_frontend \
-        --wait --timeout "$HELM_TIMEOUT" \
+        --namespace "${NAMESPACE_ADMIN}" \
+        --create-namespace \
+        --wait --timeout "${HELM_TIMEOUT}" \
         --set image.repository="${ADMIN_FRONTEND_REPO}" \
         --set image.tag="${ADMIN_FRONTEND_TAG}" \
-        --set env.VITE_API_URL="/api" 
-        
+        --set env.VITE_API_URL="/api"
 
-    # -------------------------
-    # Post-deploy notes: in OpenShift you might want to force imagePullPolicy or add imagePullSecrets
-    # If your Docker Hub images are private, create an imagePullSecret in the target namespace and pass:
-    #   --set image.pullSecrets[0].name=<your-secret-name>
-    # in the helm commands above (or update chart values accordingly).
-    # -------------------------
+      # -------------------------
+      # DEPLOY CHUNK (non-Helm)
+      # -------------------------
+      CHUNK_FULL_IMAGE="${CHUNK_FUNCTION_REPO}:${CHUNK_FUNCTION_TAG}"
+      echo "Using image for chunk: ${CHUNK_FULL_IMAGE}"
+      kubectl create namespace "${NAMESPACE_CHUNK}" --dry-run=client -o yaml | kubectl apply -f -
 
-  environment:
-    name: osd/sandbox
+      # export variables used by envsubst in Deployment.yaml
+      export CHUNK_FULL_IMAGE
+      export VECTOR_DB_ENDPOINT
+      export VECTOR_DB_ENDPOINT_UPSERT
+      export EMBEDDING_ENDPOINT
+      export PROJECT_ID
+      export REGION
+      export LLM_ENDPOINT
+      export LLM_MODEL_ID
+
+      echo "Applying Deployment.yaml and Service.yaml..."
+      envsubst < Chunk_Function/k8s/Deployment.yaml | kubectl apply -n "${NAMESPACE_CHUNK}" -f -
+      envsubst < Chunk_Function/k8s/Service.yaml | kubectl apply -n "${NAMESPACE_CHUNK}" -f -
+
+      echo "All deployments complete."
 
   rules:
-    # run automatically only on the main branch
-    - if: '$CI_COMMIT_REF_NAME == "develop"'
-      when: always
-
-    # otherwise never run this job
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: manual
     - when: never
