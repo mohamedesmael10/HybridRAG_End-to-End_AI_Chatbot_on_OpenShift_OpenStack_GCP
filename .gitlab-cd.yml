@@ -1,6 +1,6 @@
 deploy_to_osd:
   image: quay.io/openshift/origin-cli:4.13
-  stage: production-deploy  
+  stage: deploy  
 
   variables:
     HELM_TIMEOUT: "10m"
@@ -13,9 +13,7 @@ deploy_to_osd:
     - helm version
 
   script:
-    # -------------------------
-    # BASIC SETUP
-    # -------------------------
+ 
     - set -euo pipefail
     - echo "Logging into OpenShift..."
     - oc login --token="$OC_TOKEN" --server="$OC_SERVER" --insecure-skip-tls-verify=true
@@ -26,9 +24,6 @@ deploy_to_osd:
     - oc project "$NAMESPACE_USER"  || true
     - oc project "$NAMESPACE_ADMIN" || true
 
-    # -------------------------
-    # CREATE GCP SECRET
-    # -------------------------
     - echo "=== Creating GCP secret ==="
     - |
         if [ -n "${GCP_SA_KEY:-}" ]; then
@@ -59,9 +54,7 @@ deploy_to_osd:
           echo "GCP_SA_KEY not provided — skipping service-account secret creation."
         fi
 
-    # -------------------------
-    # IMAGE SPLITTING FUNCTION
-    # -------------------------
+  
     - |
       # Compute CHUNK_IMAGE_FULL if not supplied (derived from artifact registry and IMAGE_TAG)
       if [ -z "${CHUNK_IMAGE_FULL:-}" ] && [ -n "${ARTIFACT_REG_HOST:-}" ] && [ -n "${PROJECT_ID:-}" ] && [ -n "${REPO:-}" ] && [ -n "${IMAGE_TAG:-}" ]; then
@@ -80,9 +73,6 @@ deploy_to_osd:
         printf "%s|%s" "$repo" "$tag"
       }
 
-    # -------------------------
-    # RESOLVE IMAGES
-    # -------------------------
     - echo "=== Resolving image names ==="
     - USER_BACKEND_IMAGE="${USER_BACKEND_IMAGE:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/user-backend:${IMAGE_TAG}}"
     - USER_FRONTEND_IMAGE="${USER_FRONTEND_IMAGE:-${ARTIFACT_REG_HOST}/${PROJECT_ID}/${REPO}/user-frontend:${IMAGE_TAG}}"
@@ -110,9 +100,6 @@ deploy_to_osd:
         echo " CHUNK_IMAGE = $CHUNK_REPO:$CHUNK_TAG"
       fi
 
-    # -------------------------
-    # DEPLOY USER BACKEND
-    # -------------------------
     - echo "=== Deploying USER Backend ==="
     - |
       helm upgrade --install esmael-user-backend ./helm/user_backend \
@@ -138,9 +125,6 @@ deploy_to_osd:
 
 
 
-    # -------------------------
-    # DEPLOY USER FRONTEND
-    # -------------------------
     - echo "=== Deploying USER Frontend ==="
     - |
       helm upgrade --install esmael-user-frontend ./helm/user_frontend \
@@ -152,10 +136,6 @@ deploy_to_osd:
         --set env.VITE_API_URL="/api" 
 
 
-
-    # -------------------------
-    # DEPLOY ADMIN BACKEND
-    # -------------------------
     - echo "=== Deploying ADMIN Backend ==="
     - |
       helm upgrade --install esmael-admin-backend ./helm/admin_backend \
@@ -180,10 +160,6 @@ deploy_to_osd:
         --set gcpServiceAccount.fileName="service-account.json"
 
 
-
-    # -------------------------
-    # DEPLOY ADMIN FRONTEND
-    # -------------------------
     - echo "=== Deploying ADMIN Frontend ==="
     - |
       helm upgrade --install esmael-admin-frontend ./helm/admin_frontend \
@@ -199,9 +175,7 @@ deploy_to_osd:
     name: osd/sandbox
 
   rules:
-    # run automatically only on the main branch
     - if: '$CI_COMMIT_REF_NAME == "main"'
       when: always
 
-    # otherwise never run this job
     - when: never
