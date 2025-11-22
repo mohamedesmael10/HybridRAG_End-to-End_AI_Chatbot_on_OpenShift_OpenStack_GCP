@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chunk
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chunk
+  template:
+    metadata:
+      labels:
+        app: chunk
+    spec:
+      containers:
+        - name: chunk
+          image: "$(CHUNK_FULL_IMAGE)"
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+            - name: PROJECT_ID
+              value: "$(PROJECT_ID)"
+            - name: REGION
+              value: "$(REGION)"
+          volumeMounts:
+            - name: gcp-key
+              mountPath: /app/keys
+              readOnly: true
+      volumes:
+        - name: gcp-key
+          secret:
+            secretName: service-account.json
