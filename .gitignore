@@ -32,3 +32,71 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+
+/target/
+!/target/.gitkeep                # keep placeholder if you version an empty dir
+
+
+.mvn/wrapper/*
+!.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+out/
+
+# VS Code
+.vscode/
+
+# Eclipse
+.project
+.classpath
+.settings/
+bin/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+build/
+dist/
+
+
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+*.log
+logs/
+*.tmp
+*.bak
+
+
+
+Terraform/terraform-openstack/keys/*.pub
+Terraform/terraform-openstack/keys/*.pem
+
+
+
+.trraform/*
+**/.terraform/*
+.terraform*
+.terraform/
+terraform.tfstate*
+*.tfstate
+*.tfstate.*
+.terraformrc
+terraform.rc
+*.tfplan
+*.backup
+crash.log
+.infracost/
+.infracost*
+key-pair.pem
+*.pem
+
+.scannerwork/
