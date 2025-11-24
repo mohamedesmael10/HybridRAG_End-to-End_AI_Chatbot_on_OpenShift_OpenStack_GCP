@@ -1,15 +1,16 @@
 # main.py
 """
 FastAPI app: /health, /pubsub
-Flow:
- - /pubsub receives Pub/Sub message (base64 encoded)
- - decode, download file from GCS
- - call chunk service (CHUNK_URL)
- - get embeddings (EMBEDDING_ENDPOINT)
- - store embeddings in VECTOR_DB_ENDPOINT
- - acknowledge Pub/Sub message
-Error handling: collects/errors per stage and returns full details.
-Designed to run inside Cloud Run.
+Optional pull-subscriber worker (pull mode) which is safe for container startup:
+ - PROJECT_ID
+ - SUBSCRIPTION_ID  (just the name)
+ - SUBSCRIPTION_PATH (optional full "projects/<proj>/subscriptions/<sub>")
+ - RUN_PULL_SUBSCRIBER (set "true" to start the pull worker inside the container)
+
+Behaviors:
+ - Google auth initialized lazily at startup (service account file or ADC)
+ - Pub/Sub Subscriber client is created only when starting the pull subscriber
+ - Proper startup/shutdown hooks (no clients created at import time)
 """
 
 import os
@@ -17,16 +18,20 @@ import json
 import time
 import base64
 import logging
+import threading
+import signal
+import uuid
 from functools import wraps
 from typing import Optional, List, Any
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from google.cloud import storage
+from google.cloud import storage, pubsub_v1
 import google.auth
 from google.auth.transport.requests import AuthorizedSession
 
+# ----- logging -----
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pubsub-backend")
 
@@ -44,6 +49,11 @@ MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 3))
 BACKOFF_BASE = float(os.environ.get("BACKOFF_BASE", 0.2))
 REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", 30))
 
+# Subscriber config (pull mode)
+SUBSCRIPTION_ID = os.environ.get("SUBSCRIPTION_ID")          # short name (e.g. "event-subscription")
+SUBSCRIPTION_PATH = os.environ.get("SUBSCRIPTION_PATH")      # full path (projects/<proj>/subscriptions/<sub>)
+RUN_PULL_SUBSCRIBER = os.environ.get("RUN_PULL_SUBSCRIBER", "false").lower() in ("1", "true", "yes")
+
 # ---------- Helpers ----------
 def retry_on_exception(max_retries=3, backoff_base=0.2):
     def decorator(fn):
@@ -57,22 +67,40 @@ def retry_on_exception(max_retries=3, backoff_base=0.2):
                     last_exc = e
                     wait = backoff_base * (2 ** (attempt - 1))
                     logger.warning("Retry %s/%s for %s after error: %s (sleep %.2fs)",
-                                   attempt, max_retries, fn.__name__, e, wait)
+                                   attempt, max_retries, getattr(fn, "__name__", str(fn)), e, wait)
                     time.sleep(wait)
-            logger.exception("Function %s failed after %s attempts", fn.__name__, max_retries)
+            logger.exception("Function %s failed after %s attempts", getattr(fn, "__name__", str(fn)), max_retries)
             raise last_exc
         return wrapper
     return decorator
 
 # ---------- Google Authorized session ----------
-authed_session = None
-try:
-    credentials, _ = google.auth.default()
-    authed_session = AuthorizedSession(credentials)
-    logger.info("Authorized session initialized.")
-except Exception as e:
-    logger.warning("Google auth init failed: %s", e)
-    authed_session = None
+authed_session: Optional[AuthorizedSession] = None
+
+def init_google_auth():
+    """
+    Initialize AuthorizedSession with priority:
+      1) GOOGLE_APPLICATION_CREDENTIALS service account JSON
+      2) Application Default Credentials (ADC)
+    """
+    global authed_session
+    try:
+        sa_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+
+        if sa_path and os.path.exists(sa_path):
+            from google.oauth2 import service_account
+            creds = service_account.Credentials.from_service_account_file(sa_path, scopes=scopes)
+            authed_session = AuthorizedSession(creds)
+            logger.info("Google auth initialized from service account file.")
+            return
+
+        creds, _ = google.auth.default(scopes=scopes)
+        authed_session = AuthorizedSession(creds)
+        logger.info("Google auth initialized via ADC.")
+    except Exception as e:
+        authed_session = None
+        logger.warning("Google auth init failed: %s", e)
 
 # ---------- Core functions ----------
 @retry_on_exception(MAX_RETRIES, BACKOFF_BASE)
@@ -128,6 +156,29 @@ def download_from_gcs(bucket_name: str, object_name: str, dest_path: str):
 # ---------- FastAPI ----------
 app = FastAPI(title="Pub/Sub RAG Backend")
 
+# In-memory job store (simple)
+job_store = {}  # job_id -> {"status":..., "details":...}
+
+def job_update(job_id: str, status: str, details: dict | None = None):
+    job_store[job_id] = {"status": status, "details": details or {}}
+
+# background processing function (same as you had)
+def process_file_job(job_id: str, local_path: str):
+    job_update(job_id, "running")
+    errors = []
+    try:
+        chunks = call_chunk_service(local_path)
+        if not chunks:
+            raise RuntimeError("Chunk service returned empty")
+        embeddings = get_embeddings(chunks)
+        if not embeddings:
+            raise RuntimeError("No embeddings returned")
+        store_resp = store_embeddings(embeddings)
+        job_update(job_id, "done", {"acknowledged": True, "errors": errors, "stored": len(embeddings), "store_resp": store_resp})
+    except Exception as exc:
+        errors.append({"stage": "process", "error": str(exc)})
+        job_update(job_id, "failed", {"errors": errors, "exception": str(exc)})
+
 class PubSubMessage(BaseModel):
     message: dict
     subscription: Optional[str] = None
@@ -163,93 +214,25 @@ async def pubsub_endpoint(req: PubSubMessage):
         errors.append({"stage": "download", "error": str(e)})
         raise HTTPException(status_code=500, detail=f"Download error: {str(e)}")
 
-    # Chunk
+    # process synchronously for push (but you can switch to background)
     try:
         chunks = call_chunk_service(local_file)
         if not chunks:
             raise RuntimeError("Chunk service returned empty")
-    except Exception as e:
-        errors.append({"stage": "chunk", "error": str(e)})
-        raise HTTPException(status_code=503, detail=f"Chunk error: {str(e)}")
-
-    # Embeddings
-    try:
         embeddings = get_embeddings(chunks)
         if not embeddings:
             raise RuntimeError("No embeddings returned")
-    except Exception as e:
-        errors.append({"stage": "embedding", "error": str(e)})
-        raise HTTPException(status_code=503, detail=f"Embedding error: {str(e)}")
-
-    # Store embeddings
-    try:
         store_resp = store_embeddings(embeddings)
     except Exception as e:
-        errors.append({"stage": "store_embeddings", "error": str(e)})
-        raise HTTPException(status_code=503, detail=f"Store embeddings error: {str(e)}")
+        errors.append({"stage": "pipeline", "error": str(e)})
+        raise HTTPException(status_code=503, detail=f"Pipeline error: {str(e)}")
 
     ack = True
     return {"acknowledged": ack, "errors": errors, "stored": len(embeddings)}
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-# add these imports at top of main.py
-import uuid
-from fastapi import BackgroundTasks
-
-# add near top-level after app = FastAPI(...)
-job_store = {}  # simple in-memory job store: job_id -> {"status": "pending|running|done|failed", "details": {...}}
-
-# Helper to update job status
-def job_update(job_id: str, status: str, details: dict | None = None):
-    job_store[job_id] = {"status": status, "details": details or {}}
-
-# Background worker that processes a local file path
-def process_file_job(job_id: str, local_path: str):
-    """Runs the pipeline for a file already saved on disk and updates job_store."""
-    job_update(job_id, "running")
-    errors = []
-    try:
-        # 1) Chunk
-        try:
-            chunks = call_chunk_service(local_path)
-            if not chunks:
-                raise RuntimeError("Chunk service returned empty")
-        except Exception as e:
-            errors.append({"stage": "chunk", "error": str(e)})
-            raise
-
-        # 2) Embeddings
-        try:
-            embeddings = get_embeddings(chunks)
-            if not embeddings:
-                raise RuntimeError("No embeddings returned")
-        except Exception as e:
-            errors.append({"stage": "embedding", "error": str(e)})
-            raise
-
-        # 3) Store embeddings
-        try:
-            store_resp = store_embeddings(embeddings)
-        except Exception as e:
-            errors.append({"stage": "store_embeddings", "error": str(e)})
-            raise
-
-        # success
-        job_update(job_id, "done", {"acknowledged": True, "errors": errors, "stored": len(embeddings), "store_resp": store_resp})
-    except Exception as exc:
-        # record failure
-        job_update(job_id, "failed", {"errors": errors, "exception": str(exc)})
-
-# New endpoint: accept plain text, create temp file and start background job
+# Submit text endpoint and status (kept from your original code)
 @app.post("/submit_text")
 async def submit_text(payload: dict, background_tasks: BackgroundTasks):
-    """
-    Accepts JSON: { "text": "...", "filename": "optional_name.txt" }
-    Returns: { "job_id": "<uuid>", "status": "accepted" }
-    """
     text = payload.get("text", "")
     filename = payload.get("filename", f"doc_{str(uuid.uuid4())[:8]}.txt")
     if not text:
@@ -259,25 +242,211 @@ async def submit_text(payload: dict, background_tasks: BackgroundTasks):
     local_path = f"/tmp/{job_id}_{filename.replace('/', '_')}"
     try:
         with open(local_path, "wb") as f:
-            # write bytes so pipeline can open as file
             f.write(text.encode("utf-8"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save text: {e}")
 
-    # initialize job store and start background task
     job_update(job_id, "accepted", {"local_path": local_path})
     background_tasks.add_task(process_file_job, job_id, local_path)
-
     return {"job_id": job_id, "status": "accepted"}
 
-# New endpoint: check job status
 @app.get("/status/{job_id}")
 async def job_status(job_id: str):
-    """
-    Returns job state and any details.
-    Example: { "job_id": "...", "status": "done", "details": {...} }
-    """
     job = job_store.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, "status": job["status"], "details": job["details"]}
+
+# ---------- Optional pull-subscriber worker (lazy client creation) ----------
+subscriber_client: Optional[pubsub_v1.SubscriberClient] = None
+streaming_future = None
+subscriber_thread: Optional[threading.Thread] = None
+_stop_event = threading.Event()
+
+def build_subscription_name(client: Optional[pubsub_v1.SubscriberClient] = None) -> str:
+    """
+    Build a fully-qualified subscription name WITHOUT creating a client unless caller passed one.
+    This prevents early client creation at module import time which can fail when credentials aren't ready.
+    """
+    if SUBSCRIPTION_PATH:
+        logger.info("Using SUBSCRIPTION_PATH from env: %s", SUBSCRIPTION_PATH)
+        return SUBSCRIPTION_PATH
+    if SUBSCRIPTION_ID and SUBSCRIPTION_ID.startswith("projects/"):
+        logger.info("SUBSCRIPTION_ID contains full path, using as-is.")
+        return SUBSCRIPTION_ID
+    if not PROJECT_ID or not SUBSCRIPTION_ID:
+        raise RuntimeError("PROJECT_ID and SUBSCRIPTION_ID must be set if SUBSCRIPTION_PATH not provided")
+    if client:
+        return client.subscription_path(PROJECT_ID, SUBSCRIPTION_ID)
+    # fallback to manual path build (safe string, avoids client creation)
+    return f"projects/{PROJECT_ID}/subscriptions/{SUBSCRIPTION_ID}"
+
+def pull_callback(message: pubsub_v1.subscriber.message.Message):
+    try:
+        logger.info("Pull received message: %s", message.data)
+        # decode payload
+        try:
+            payload = json.loads(base64.b64decode(message.data).decode("utf-8"))
+        except Exception as e:
+            logger.exception("Decode error: %s", e)
+            message.nack()
+            return
+
+        bucket = payload.get("bucket")
+        name = payload.get("name")
+
+        if not bucket or not name:
+            logger.error("Invalid message: missing bucket or name")
+            message.nack()
+            return
+
+        # download file
+        try:
+            local_file = f"/tmp/{name.replace('/', '_')}"
+            download_from_gcs(bucket, name, local_file)
+        except Exception as e:
+            logger.exception("Download error: %s", e)
+            message.nack()
+            return
+
+        # chunk
+        try:
+            chunks = call_chunk_service(local_file)
+            if not chunks:
+                raise RuntimeError("Chunk service returned empty")
+        except Exception as e:
+            logger.exception("Chunking error: %s", e)
+            message.nack()
+            return
+
+        # embeddings
+        try:
+            embeddings = get_embeddings(chunks)
+            if not embeddings:
+                raise RuntimeError("No embeddings returned")
+        except Exception as e:
+            logger.exception("Embedding error: %s", e)
+            message.nack()
+            return
+
+        # store
+        try:
+            store_embeddings(embeddings)
+        except Exception as e:
+            logger.exception("Store embeddings error: %s", e)
+            message.nack()
+            return
+
+        # success → ACK
+        message.ack()
+        logger.info("Message processed successfully: %s", name)
+
+    except Exception as e:
+        logger.exception("Unexpected error in pull_callback: %s", e)
+        try:
+            message.nack()
+        except Exception:
+            pass
+
+def _subscriber_runner(client: pubsub_v1.SubscriberClient, sub_name: str):
+    """
+    Runs the streaming future in the thread to keep it alive.
+    """
+    global streaming_future
+    try:
+        streaming_future = client.subscribe(sub_name, callback=pull_callback)
+        logger.info("Streaming future started for %s", sub_name)
+        # block until cancelled or exception
+        streaming_future.result()
+    except Exception as exc:
+        logger.exception("Subscriber terminated with exception: %s", exc)
+    finally:
+        logger.info("Subscriber runner exiting")
+
+def start_pull_subscriber():
+    """
+    Create client lazily and start subscriber in a daemon thread.
+    """
+    global subscriber_client, subscriber_thread, streaming_future
+
+    if subscriber_thread and subscriber_thread.is_alive():
+        logger.info("Subscriber already running")
+        return
+
+    try:
+        # initialize google auth if needed (best-effort)
+        if not authed_session:
+            init_google_auth()
+
+        subscriber_client = pubsub_v1.SubscriberClient()
+        sub_name = build_subscription_name(subscriber_client)
+        logger.info("Starting pull subscriber for: %s", sub_name)
+
+        subscriber_thread = threading.Thread(target=_subscriber_runner, args=(subscriber_client, sub_name), name="pubsub-subscriber", daemon=True)
+        subscriber_thread.start()
+    except Exception:
+        logger.exception("Failed to start pull subscriber")
+        # cleanup on failure
+        try:
+            if streaming_future:
+                streaming_future.cancel()
+        except Exception:
+            pass
+
+def stop_pull_subscriber():
+    """
+    Cancel streaming future and close client. Called on shutdown.
+    """
+    global streaming_future, subscriber_client, subscriber_thread
+    logger.info("Stopping pull subscriber...")
+    try:
+        if streaming_future:
+            try:
+                streaming_future.cancel()
+            except Exception:
+                logger.exception("Error cancelling streaming_future")
+            streaming_future = None
+        if subscriber_client:
+            try:
+                subscriber_client.close()
+            except Exception:
+                logger.exception("Error closing subscriber_client")
+            subscriber_client = None
+        if subscriber_thread and subscriber_thread.is_alive():
+            # give it a moment to exit
+            subscriber_thread.join(timeout=5.0)
+    except Exception:
+        logger.exception("Error while stopping subscriber")
+    _stop_event.set()
+    logger.info("Pull subscriber stopped")
+
+# Hook into FastAPI lifecycle
+@app.on_event("startup")
+def on_startup():
+    logger.info("App startup: initializing google auth and optionally starting pull subscriber")
+    # initialize auth (best-effort)
+    init_google_auth()
+
+    if RUN_PULL_SUBSCRIBER:
+        logger.info("RUN_PULL_SUBSCRIBER enabled, launching pull subscriber")
+        start_pull_subscriber()
+    else:
+        logger.info("RUN_PULL_SUBSCRIBER not enabled; pull subscriber will not be started")
+
+@app.on_event("shutdown")
+def on_shutdown():
+    logger.info("App shutdown: stopping pull subscriber if running")
+    stop_pull_subscriber()
+
+# Support sigterm/interrupt when run directly (uvicorn may handle signals itself)
+def _signal_handler(sig, frame):
+    logger.info("Signal received: %s, stopping subscriber...", sig)
+    stop_pull_subscriber()
+
+signal.signal(signal.SIGTERM, _signal_handler)
+signal.signal(signal.SIGINT, _signal_handler)
+
+# local debug entrypoint
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
