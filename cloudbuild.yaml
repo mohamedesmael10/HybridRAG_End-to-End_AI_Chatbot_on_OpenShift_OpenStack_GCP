@@ -383,6 +383,7 @@ steps:
       TF_JSON_FILE="/workspace/tf_outputs.json"
       if [ ! -f "${TF_JSON_FILE}" ]; then echo "ERROR: Terraform outputs not found"; exit 1; fi
       TF_JSON=$(cat "${TF_JSON_FILE}")
+
       EMBEDDING_ENDPOINT=$(echo "${TF_JSON}" | jq -r '.embedding_endpoint.value // empty')
       CHUNK_URL=$(echo "${TF_JSON}" | jq -r '.chunk_url.value // empty')
       VECTOR_DB_ENDPOINT=$(echo "${TF_JSON}" | jq -r '.vector_db_endpoint_find_neighbors.value // empty')
@@ -391,30 +392,53 @@ steps:
       TF_PROJECT_ID=$(echo "${TF_JSON}" | jq -r '.project_id.value // empty')
       TF_REGION=$(echo "${TF_JSON}" | jq -r '.region.value // empty')
       CHUNK_IMAGE_FULL=$(echo "${TF_JSON}" | jq -r '.chunk_image_full.value // empty')
+
+      # Pub/Sub outputs (new)
+      SUBSCRIPTION_ID=$(echo "${TF_JSON}" | jq -r '.event_subscription_name.value // empty')
+      SUBSCRIPTION_PATH=$(echo "${TF_JSON}" | jq -r '.event_subscription_path.value // empty')
+      DLT_SUBSCRIPTION_ID=$(echo "${TF_JSON}" | jq -r '.dlt_subscription_name.value // empty')
+      DLT_SUBSCRIPTION_PATH=$(echo "${TF_JSON}" | jq -r '.dlt_subscription_path.value // empty')
+
+      # Build fallback full path if only short name is provided
+      if [ -z "${SUBSCRIPTION_PATH}" ] && [ -n "${SUBSCRIPTION_ID}" ] && [ -n "${TF_PROJECT_ID}" ]; then
+        SUBSCRIPTION_PATH="projects/${TF_PROJECT_ID}/subscriptions/${SUBSCRIPTION_ID}"
+      fi
+      if [ -z "${DLT_SUBSCRIPTION_PATH}" ] && [ -n "${DLT_SUBSCRIPTION_ID}" ] && [ -n "${TF_PROJECT_ID}" ]; then
+        DLT_SUBSCRIPTION_PATH="projects/${TF_PROJECT_ID}/subscriptions/${DLT_SUBSCRIPTION_ID}"
+      fi
+
       IMAGE_TAG="${SHORT_SHA:-}"
       REPO="${_REPO:-}"
       ARTIFACT_REG_HOST="${_ARTIFACT_REG_HOST:-}"
       if [ -z "${CHUNK_IMAGE_FULL}" ] && [ -n "${ARTIFACT_REG_HOST}" ] && [ -n "${TF_PROJECT_ID}" ] && [ -n "${REPO}" ] && [ -n "${IMAGE_TAG}" ]; then
         CHUNK_IMAGE_FULL="${ARTIFACT_REG_HOST}/${TF_PROJECT_ID}/${REPO}/chunk-image:${IMAGE_TAG}"
       fi
+
       GITLAB_TOKEN="${GITLAB}"
       if [ -z "${GITLAB_TOKEN}" ]; then echo "ERROR: Could not read GITLAB secret"; exit 1; fi
+
       API="https://gitlab.com/api/v4/projects/${_GITLAB_PROJ_ID}/trigger/pipeline"
       curl -s -X POST "${API}" \
-      -F token="${GITLAB_TRIGGER_TOKEN}" \
-      -F ref="${_GITLAB_REF:-main}" \
-      -F "variables[IMAGE_TAG]=${IMAGE_TAG}" \
-      -F "variables[REPO]=${REPO}" \
-      -F "variables[ARTIFACT_REG_HOST]=${ARTIFACT_REG_HOST}" \
-      -F "variables[CHUNK_IMAGE_FULL]=${CHUNK_IMAGE_FULL}" \
-      -F "variables[EMBEDDING_ENDPOINT]=${EMBEDDING_ENDPOINT}" \
-      -F "variables[CHUNK_URL]=${CHUNK_URL}" \
-      -F "variables[VECTOR_DB_ENDPOINT]=${VECTOR_DB_ENDPOINT}" \
-      -F "variables[DEPLOYED_INDEX_ID]=${DEPLOYED_INDEX_ID}" \
-      -F "variables[PROJECT_ID]=${TF_PROJECT_ID}" \
-      -F "variables[REGION]=${TF_REGION}" \
-      -F "variables[RUN_DEPLOY_TO_OSD]=true" \
-      -o /workspace/gitlab_trigger_response.txt
+        -F token="${GITLAB_TRIGGER_TOKEN}" \
+        -F ref="${_GITLAB_REF:-main}" \
+        -F "variables[IMAGE_TAG]=${IMAGE_TAG}" \
+        -F "variables[REPO]=${REPO}" \
+        -F "variables[ARTIFACT_REG_HOST]=${ARTIFACT_REG_HOST}" \
+        -F "variables[CHUNK_IMAGE_FULL]=${CHUNK_IMAGE_FULL}" \
+        -F "variables[EMBEDDING_ENDPOINT]=${EMBEDDING_ENDPOINT}" \
+        -F "variables[CHUNK_URL]=${CHUNK_URL}" \
+        -F "variables[VECTOR_DB_ENDPOINT]=${VECTOR_DB_ENDPOINT}" \
+        -F "variables[VECTOR_DB_ENDPOINT_UPSERT]=${VECTOR_DB_ENDPOINT_UPSERT}" \
+        -F "variables[DEPLOYED_INDEX_ID]=${DEPLOYED_INDEX_ID}" \
+        -F "variables[PROJECT_ID]=${TF_PROJECT_ID}" \
+        -F "variables[REGION]=${TF_REGION}" \
+        -F "variables[SUBSCRIPTION_ID]=${SUBSCRIPTION_ID}" \
+        -F "variables[SUBSCRIPTION_PATH]=${SUBSCRIPTION_PATH}" \
+        -F "variables[DLT_SUBSCRIPTION_ID]=${DLT_SUBSCRIPTION_ID}" \
+        -F "variables[DLT_SUBSCRIPTION_PATH]=${DLT_SUBSCRIPTION_PATH}" \
+        -F "variables[RUN_DEPLOY_TO_OSD]=true" \
+        -o /workspace/gitlab_trigger_response.txt
+
 
 images:
 - '${_ARTIFACT_REG_HOST}/${_PROJECT_ID}/${_REPO}/admin-backend:$SHORT_SHA'
