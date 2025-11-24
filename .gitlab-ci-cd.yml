@@ -526,6 +526,7 @@ terraform-deploy:
         --set env.MEMORY_STORE_PORT="${MEMORY_STORE_PORT:-6379}" \
         --set env.LLM_ENDPOINT="${LLM_ENDPOINT:-}" \
         --set env.LLM_MODEL_ID="${LLM_MODEL_ID:-}" \
+        --set env.GOOGLE_APPLICATION_CREDENTIALS="/app/keys/service-account.json" \
         --set gcpServiceAccount.secretName="service-account.json" \
         --set gcpServiceAccount.mountPath="/app/keys" \
         --set gcpServiceAccount.fileName="service-account.json"
@@ -561,6 +562,9 @@ terraform-deploy:
         --set env.MEMORY_STORE_PORT="${MEMORY_STORE_PORT:-6379}" \
         --set env.LLM_ENDPOINT="${LLM_ENDPOINT:-}" \
         --set env.LLM_MODEL_ID="${LLM_MODEL_ID:-}" \
+        --set env.GOOGLE_APPLICATION_CREDENTIALS="/app/keys/service-account.json" \
+        --set env.SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-}" \
+        --set env.SUBSCRIPTION_PATH="${SUBSCRIPTION_PATH:-}" \
         --set gcpServiceAccount.secretName="service-account.json" \
         --set gcpServiceAccount.mountPath="/app/keys" \
         --set gcpServiceAccount.fileName="service-account.json"
