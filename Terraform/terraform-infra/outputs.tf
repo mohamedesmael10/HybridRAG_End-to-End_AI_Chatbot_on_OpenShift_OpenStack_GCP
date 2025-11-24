@@ -91,3 +91,36 @@ output "region" {
 output "chunk_image_full" {
   value = "${var.artifact_registry_host}/${var.project_id}/${var.repo}/chunk-image:${var.chunk_image_tag}"
 }
+
+# Outputs for Pub/Sub topics
+output "bucket_events_topic_name" {
+  value = google_pubsub_topic.bucket_events_topic.name
+}
+
+output "bucket_events_topic_id" {
+  value = google_pubsub_topic.bucket_events_topic.id
+}
+
+output "dlt_topic_name" {
+  value = google_pubsub_topic.dlt_topic.name
+}
+
+output "dlt_topic_id" {
+  value = google_pubsub_topic.dlt_topic.id
+}
+
+output "event_subscription_name" {
+  value = google_pubsub_subscription.event_sub.name
+}
+
+output "event_subscription_path" {
+  value = google_pubsub_subscription.event_sub.id
+}
+
+output "dlt_subscription_name" {
+  value = google_pubsub_subscription.dlt_sub.name
+}
+
+output "dlt_subscription_path" {
+  value = google_pubsub_subscription.dlt_sub.id
+}

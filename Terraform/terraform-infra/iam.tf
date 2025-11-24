@@ -1,7 +1,7 @@
-module "user_cloud_run_sa" {
+module "user_sa" {
     source = "./modules/service_account_module"
     account_id = "user-cloud-run-sa"
-    display_name = "User Cloud Run Service Account"
+    display_name = "User Account"
     project_id = var.project_id
     rules = [
         "roles/run.invoker",
@@ -24,10 +24,10 @@ module "admin_bucket_sa" {
     ]
 }
 
-module "admin_cloud_run_sa" {
+module "admin_sa" {
     source = "./modules/service_account_module"
     account_id = "admin-cloud-run-sa"
-    display_name = "Admin Cloud Run Service Account"
+    display_name = "Admin Account"
     project_id = var.project_id
     rules = [
         "roles/run.invoker",
