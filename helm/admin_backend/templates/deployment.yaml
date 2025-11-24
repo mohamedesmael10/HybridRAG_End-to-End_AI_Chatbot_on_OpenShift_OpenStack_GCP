@@ -23,8 +23,6 @@ spec:
           env:
             - name: EMBEDDING_ENDPOINT
               value: "{{ .Values.env.EMBEDDING_ENDPOINT }}"
-            - name: METADATA_DB_URL
-              value: "{{ .Values.env.METADATA_DB_URL }}"
             - name: CHUNK_URL
               value: "{{ .Values.env.CHUNK_URL }}"
             - name: VECTOR_DB_ENDPOINT
@@ -35,35 +33,34 @@ spec:
               value: "{{ .Values.env.PROJECT_ID }}"
             - name: REGION
               value: "{{ .Values.env.REGION }}"
+            # ========= NEW REQUIRED VARS =========
+            - name: SUBSCRIPTION_ID
+              value: "{{ .Values.env.SUBSCRIPTION_ID }}"
+            - name: RUN_PULL_SUBSCRIBER
+              value: "{{ .Values.env.RUN_PULL_SUBSCRIBER }}"
+            # OPTIONAL (if using full path)
+            - name: SUBSCRIPTION_PATH
+              value: "{{ .Values.env.SUBSCRIPTION_PATH }}"
+            # =====================================
             - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: "/app/keys/{{ .Values.gcpServiceAccountKeyFile }}" 
+              value: {{ printf "%s/%s" (default "/app/keys" .Values.gcpServiceAccount.mountPath) (default "service-account.json" .Values.gcpServiceAccount.fileName) | quote }}
+          volumeMounts:
+            - name: gcp-sa
+              mountPath: {{ default "/app/keys" .Values.gcpServiceAccount.mountPath | quote }}
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /health
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds }}
-            periodSeconds: {{ .Values.probe.periodSeconds }}
-            timeoutSeconds: {{ .Values.probe.timeoutSeconds }}
           livenessProbe:
             httpGet:
               path: /health
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds }}
-            periodSeconds: {{ .Values.probe.periodSeconds }}
-            timeoutSeconds: {{ .Values.probe.timeoutSeconds }}
-          resources:
-            limits:
-              cpu: {{ .Values.resources.limits.cpu }}
-              memory: {{ .Values.resources.limits.memory }}
-            requests:
-              cpu: {{ .Values.resources.requests.cpu }}
-              memory: {{ .Values.resources.requests.memory }}
-          
-          volumeMounts:
-            - name: gcp-sa
-              mountPath: {{ .Values.gcpServiceAccount.mountPath }}
-              readOnly: true  
       volumes:
         - name: gcp-sa
           secret:
-            secretName: {{ .Values.gcpServiceAccount.secretName }}
+            secretName: {{ default "service-account.json" .Values.gcpServiceAccount.secretName | quote }}
+            {{- /* If you want a specific key->filename mapping, uncomment/adjust items */}}    
+            # items:
+            #   - key: {{ default "service-account.json" .Values.gcpServiceAccount.fileName | quote }}
+            #     path: {{ default "service-account.json" .Values.gcpServiceAccount.fileName | quote }}

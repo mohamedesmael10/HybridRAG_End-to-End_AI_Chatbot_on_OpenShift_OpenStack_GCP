@@ -10,6 +10,8 @@ WORKDIR /app
 # Copy virtual environment
 COPY --from=builder /opt/venv /opt/venv
 
+RUN chmod -R a+rx /opt/venv && find /opt/venv -type f -name '*.so' -exec chmod a+r {} \;
+
 # Copy app source
 COPY . .
 

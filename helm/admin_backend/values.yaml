@@ -31,6 +31,9 @@ env:
   PROJECT_ID: "PROJECT_ID_PLACEHOLDER"
   REGION: "REGION_PLACEHOLDER"
 
+  SUBSCRIPTION_ID: "event-subscription"        
+  SUBSCRIPTION_PATH: ""                        
+  RUN_PULL_SUBSCRIBER: "true"
 
 # Probe settings
 probe:

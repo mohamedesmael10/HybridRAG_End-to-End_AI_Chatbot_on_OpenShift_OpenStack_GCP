@@ -11,3 +11,7 @@ data:
   PROJECT_ID: "{{ .Values.env.PROJECT_ID }}"
   REGION: "{{ .Values.env.REGION }}"
 
+  # ---------- NEW Pub/Sub Pull Subscriber Settings ----------
+  SUBSCRIPTION_ID: "{{ .Values.env.SUBSCRIPTION_ID }}"
+  SUBSCRIPTION_PATH: "{{ .Values.env.SUBSCRIPTION_PATH }}"
+  RUN_PULL_SUBSCRIBER: "{{ .Values.env.RUN_PULL_SUBSCRIBER }}"

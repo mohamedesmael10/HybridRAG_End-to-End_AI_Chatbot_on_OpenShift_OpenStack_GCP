@@ -35,15 +35,13 @@ spec:
               value: "{{ .Values.env.MEMORY_STORE_HOST }}"
             - name: MEMORY_STORE_PORT
               value: "{{ .Values.env.MEMORY_STORE_PORT }}"
-{{- /* Optional Redis password from secret — only render if secrets map exists and name provided */}}
-{{- if and .Values.secrets .Values.secrets.memoryStoreSecretName }}
-{{- $s := .Values.secrets }}
+          {{- if and .Values.secrets .Values.secrets.memoryStoreSecretName }}
             - name: MEMORY_STORE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $s.memoryStoreSecretName | quote }}
-                  key: {{ $s.memoryStorePasswordKey | default "MEMORY_STORE_PASSWORD" | quote }}
-{{- end }}
+                  name: {{ .Values.secrets.memoryStoreSecretName | quote }}
+                  key: {{ .Values.secrets.memoryStorePasswordKey | default "MEMORY_STORE_PASSWORD" | quote }}
+          {{- end }}
             - name: PROJECT_ID
               value: "{{ .Values.env.PROJECT_ID }}"
             - name: REGION
@@ -56,7 +54,7 @@ spec:
               value: "{{ .Values.env.LLM_TEMPERATURE }}"
             - name: LLM_MAX_OUTPUT_TOKENS
               value: "{{ .Values.env.LLM_MAX_OUTPUT_TOKENS }}"
-            # GOOGLE_APPLICATION_CREDENTIALS points to the mounted secret file
+            # GOOGLE_APPLICATION_CREDENTIALS -> points to mounted secret file
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: {{ printf "%s/%s" (default "/app/keys" .Values.gcpServiceAccount.mountPath) (default "service-account.json" .Values.gcpServiceAccount.fileName) | quote }}
           volumeMounts:
@@ -67,16 +65,16 @@ spec:
             httpGet:
               path: /health
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 3
+            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds | default 10 }}
+            periodSeconds: {{ .Values.probe.periodSeconds | default 15 }}
+            timeoutSeconds: {{ .Values.probe.timeoutSeconds | default 5 }}
           livenessProbe:
             httpGet:
               path: /health
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: 30
-            periodSeconds: 20
-            timeoutSeconds: 5
+            initialDelaySeconds: {{ .Values.probe.initialDelaySeconds | default 30 }}
+            periodSeconds: {{ .Values.probe.periodSeconds | default 20 }}
+            timeoutSeconds: {{ .Values.probe.timeoutSeconds | default 5 }}
           resources:
             limits:
               cpu: {{ .Values.resources.limits.cpu | quote }}
@@ -88,8 +86,7 @@ spec:
         - name: gcp-sa
           secret:
             secretName: {{ default "service-account.json" .Values.gcpServiceAccount.secretName | quote }}
-
-            # optional: if you want to force the file key -> filename mapping uncomment and adjust
+            {{- /* If you want a specific key->filename mapping, uncomment/adjust items */}}
             # items:
-            #   - key: {{ (or .Values.gcpServiceAccount.fileName "service-account.json") | quote }}
-            #     path: {{ (or .Values.gcpServiceAccount.fileName "service-account.json") | quote }}
+            #   - key: {{ default "service-account.json" .Values.gcpServiceAccount.fileName | quote }}
+            #     path: {{ default "service-account.json" .Values.gcpServiceAccount.fileName | quote }}
