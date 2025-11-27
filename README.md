@@ -23,17 +23,17 @@ This repository focuses on HybridRAG production deployment on OpenShift (OSD).
 
 ### OSD (OpenShift) Repository:
 
- . [GitHub: HybridRAG – OSD Deployment](https://github.com/mohamedesmael10/HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP/tree/main)
+ * **[GitHub: HybridRAG – OSD Deployment](https://github.com/mohamedesmael10/HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP/tree/main)**
 
- . [GitLab: HybridRAG – OSD Deployment](https://gitlab.com/mohamedesmael10/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp)
+ * **[GitLab: HybridRAG – OSD Deployment](https://gitlab.com/mohamedesmael10/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp)**
 
 The OpenStack version is maintained separately for development and testing:
 
 ### OpenStack (Development) Repository:
 
- . [GitHub: HybridRAG – OpenStack Deployment](https://github.com/mohamedesmael10/HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP/tree/develop)
+ * **[GitHub: HybridRAG – OpenStack Deployment](https://github.com/mohamedesmael10/HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP/tree/develop)**
 
- . [GitLab: HybridRAG – OpenStack Deployment](https://gitlab.com/mohamedesmael10/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp/-/tree/develop?ref_type=heads)
+ * **[GitLab: HybridRAG – OpenStack Deployment](https://gitlab.com/mohamedesmael10/hybridrag_end-to-end_ai_chatbot_on_openshift_openstack_gcp/-/tree/develop?ref_type=heads)**
 
 ---
 
