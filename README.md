@@ -514,6 +514,6 @@ python main.py  # or run tests
 
 ---
 
-**Author:** Mohamed Esmael — DevOps | Cloud | System Admin Engineer · [LinkedIn](https://www.linkedin.com/in/mohamedesmael/) · [GitHub](https://github.com/mohamedesmael10/)
+**Author:** Mohamed Esmael — DevOps | Cloud | System Admin Engineer 
 
 © 2025 Mohamed Esmael · [LinkedIn](https://www.linkedin.com/in/mohamedesmael/) · [GitHub](https://github.com/mohamedesmael10/)
