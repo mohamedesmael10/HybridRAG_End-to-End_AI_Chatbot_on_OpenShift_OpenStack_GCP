@@ -492,6 +492,8 @@ python main.py  # or run tests
 ---
 ## Additional Shots
 
+![Screenshots](https://github.com/mohamedesmael10/HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP/blob/main/Screenshots/0.1.png)
+
 ![Screenshots](https://github.com/mohamedesmael10/HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP/blob/main/Screenshots/(2).png)
 
 ![Screenshots](https://github.com/mohamedesmael10/HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP/blob/main/Screenshots/(14).png)
