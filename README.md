@@ -487,8 +487,9 @@ python main.py  # or run tests
                   │ - Uses secrets injected via GitLab CD      │
                   │ - Autoscaling + Rolling Updates            │
                   └────────────────────────────────────────────┘
+                  
 
-
+![Screenshots](https://github.com/mohamedesmael10/HybridRAG_End-to-End_AI_Chatbot_on_OpenShift_OpenStack_GCP/blob/main/Screenshots/0.2.png)
 ---
 ## Additional Shots
 
